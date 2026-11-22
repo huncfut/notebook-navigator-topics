@@ -1,0 +1,54 @@
+button.nn-icon-button.nn-navitem-hover-action-button.nn-topics-persistent-action {
+    visibility: visible;
+    pointer-events: auto;
+}
+
+button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
+    color: var(--text-warning);
+}
+
+.nn-topics-warning {
+    color: var(--text-warning);
+}
+
+.nn-topics-inline:hover {
+    text-decoration: underline;
+}
+
+.nn-topics-modal fieldset {
+    margin-block: 10px;
+    min-width: 0;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.nn-topics-field,
+.nn-topics-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: space-between;
+    margin-block: 8px;
+}
+
+.nn-topics-field :is(input:not([type='checkbox']), select, textarea) {
+    flex: 1;
+    min-width: min(100%, 12em);
+}
+
+.nn-topics-modal .nn-topics-inline {
+    padding: 0;
+    height: auto;
+    background: none;
+    box-shadow: none;
+    color: var(--link-color);
+}
+
+.nn-topics-cycle li {
+    margin-block: 8px;
+}
+
+[data-drop-zone='topic'].nn-drag-over {
+    background-color: var(--nn-computed-tag-positive-bg, var(--nn-theme-tag-positive-bg));
+    border-radius: min(14px, var(--nn-theme-navitem-border-radius));
+}
