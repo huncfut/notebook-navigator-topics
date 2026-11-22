@@ -1,0 +1,23 @@
+# Notebook Navigator Topics
+
+## Workspace boundaries
+
+- Treat the sibling `../notebook-navigator/` repository as strictly read-only. Never modify its files or Git state, install dependencies there, or run commands that generate files there. If a build needs to modify upstream source, copy it into this repository first.
+- Keep project source, scripts, documentation, and build output in this repository. Test approved changes in the sibling `../dev-vault/`. The installer and uninstaller may write only to the installed Notebook Navigator plugin directory in the vault supplied explicitly to the script. Preserve vault notes and plugin settings.
+
+## Language
+
+- Use English for all project work, including plans, code, comments, documentation, script output, commit messages, GitHub issues, and pull requests. The Polish notes and files in the development vault are test data. Preserve their language and contents.
+
+## Planning and GitHub workflow
+
+- Define the goal, proposed changes, and verification steps in a plan. Use a GitHub issue to track the work and get the user's approval before implementing any change or fix. If the plan changes materially, get approval for the revised plan before proceeding.
+- Create one branch per approved issue from `main`. Use names such as `feat/12-topic-tree` and `fix/18-uninstall-version-check`. Verify changes in the development vault where applicable, and link the pull request to the issue.
+- Keep `main` as the reviewed branch and use pull requests to merge into it. For an empty repository, prepare the initial commit on `chore/bootstrap` and establish `main` from the approved commit.
+
+## Installation and versioning
+
+- Provide separate install and uninstall scripts. Each takes a vault path explicitly and targets its `.obsidian/plugins/notebook-navigator/` directory.
+- Match each expansion release to the exact upstream plugin version and tag it `v<upstream-version>`. For example, expansion release `3.5.1` targets Notebook Navigator `3.5.1`.
+- Before replacing files, the installer must verify the plugin ID, exact version, and supported build, then back up the original files it will replace.
+- Before restoring the originals, the uninstaller must verify that the files it will replace or remove belong to the installed expansion. Both scripts must stop before making changes if their checks fail, including when Notebook Navigator has been updated since installation.
