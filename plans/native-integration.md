@@ -1,6 +1,6 @@
 # Notebook Navigator Topics native integration
 
-Proposed revision for [issue #1](https://github.com/huncfut/notebook-navigator-topics/issues/1). The source map is for Notebook Navigator `3.5.1` at commit `44215001884fa57351e6eb387355fbe5eb660975`. The feature scope is defined in [PLAN.md](PLAN.md).
+Integration plan for [issue #1](https://github.com/huncfut/notebook-navigator-topics/issues/1). The source map is for Notebook Navigator `3.5.1` at commit `44215001884fa57351e6eb387355fbe5eb660975`. The [first-release plan](first-release.md) defines the feature scope.
 
 ## Upstream code map
 

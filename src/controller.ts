@@ -184,36 +184,49 @@ export class TopicsController {
             const child = this.app.vault.getFileByPath(childPath);
             const parent = this.app.vault.getFileByPath(parentPath);
             if (!section || !graph?.nodes.has(childPath) || !graph.nodes.has(parentPath) || !child || !parent) {
-                throw new Error('The section or one of its notes has changed. Select the notes again.');
+                throw new Error('The section or one of its notes has changed.');
             }
 
-            if (operation === 'add' && !allowCycle && wouldIntroduceCycle(graph, childPath, parentPath)) return 'cycle';
-
+            const cycle = new Error('Topic link would create a cycle.');
             let changed: TopicNote['properties'] | undefined;
-            await this.app.fileManager.processFrontMatter(child, properties => {
-                const key = propertyKey(properties, section.relationshipProperty) ?? section.relationshipProperty;
-                const current: unknown = Object.prototype.hasOwnProperty.call(properties, key) ? properties[key] : undefined;
-                const entries = propertyValues(current);
-                const kept = entries.filter(value => {
-                    const target = linkPath(value);
-                    return !target || this.resolveLink(target, childPath) !== parentPath;
-                });
-                if (operation === 'add' && kept.length === entries.length) {
-                    const newLink = this.app.fileManager.generateMarkdownLink(parent, childPath);
-                    Object.defineProperty(properties, key, {
-                        value: [...entries, newLink],
-                        writable: true,
-                        configurable: true,
-                        enumerable: true
+            try {
+                await this.app.fileManager.processFrontMatter(child, properties => {
+                    const property = section.relationshipProperty;
+                    const key = propertyKey(properties, property);
+                    const current = key === undefined ? undefined : properties[key];
+                    const entries = propertyValues(current);
+                    const kept = entries.filter(value => {
+                        const target = linkPath(value);
+                        return !target || this.resolveLink(target, childPath) !== parentPath;
                     });
-                } else if (operation === 'remove' && kept.length !== entries.length) {
-                    if (Array.isArray(current)) properties[key] = kept;
-                    else delete properties[key];
-                }
-                changed = { ...properties };
-            });
-            if (changed) this.notes.set(childPath, { path: childPath, properties: changed });
-            this.refresh();
+
+                    if (operation === 'remove') {
+                        if (key === undefined || kept.length === entries.length) return;
+                        if (Array.isArray(current)) properties[key] = kept;
+                        else delete properties[key];
+                    } else {
+                        if (kept.length !== entries.length) return;
+                        const parents = graph.parents.get(childPath)?.includes(parentPath)
+                            ? new Map(graph.parents).set(childPath, [])
+                            : graph.parents;
+                        if (!allowCycle && wouldIntroduceCycle({ ...graph, parents }, childPath, parentPath)) throw cycle;
+                        Object.defineProperty(properties, key ?? property, {
+                            value: [...entries, this.app.fileManager.generateMarkdownLink(parent, childPath)],
+                            writable: true,
+                            configurable: true,
+                            enumerable: true
+                        });
+                    }
+                    changed = { ...properties };
+                });
+            } catch (error) {
+                if (error === cycle) return 'cycle';
+                throw error;
+            }
+            if (changed) {
+                this.notes.set(childPath, { path: childPath, properties: changed });
+                this.refresh();
+            }
             return 'saved';
         });
     }

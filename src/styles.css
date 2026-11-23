@@ -11,14 +11,29 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     color: var(--text-warning);
 }
 
-.nn-topics-inline:hover {
-    text-decoration: underline;
+.nn-topics-settings-group {
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+    border: 0;
 }
 
-.nn-topics-modal fieldset {
-    margin-block: 10px;
+.nn-topics-settings-group + .nn-topics-settings-group,
+.nn-topics-settings-group > .nn-topics-actions {
+    margin-block-start: var(--size-4-4);
+}
+
+.nn-topics-settings-group legend {
+    padding: 0;
+    font-weight: var(--font-semibold);
+}
+
+.nn-topics-settings-group .setting-item-control {
     min-width: 0;
-    border: 1px solid var(--background-modifier-border);
+}
+
+.nn-topics-settings-group :is(input, textarea, select) {
+    max-width: 100%;
 }
 
 .nn-topics-field,
@@ -36,19 +51,241 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     min-width: min(100%, 12em);
 }
 
-.nn-topics-modal .nn-topics-inline {
-    padding: 0;
-    height: auto;
-    background: none;
-    box-shadow: none;
-    color: var(--link-color);
-}
-
-.nn-topics-cycle li {
-    margin-block: 8px;
-}
-
 [data-drop-zone='topic'].nn-drag-over {
     background-color: var(--nn-computed-tag-positive-bg, var(--nn-theme-tag-positive-bg));
     border-radius: min(14px, var(--nn-theme-navitem-border-radius));
+}
+
+.view-content.nn-topic-graph-content {
+    padding: 0;
+    overflow: auto;
+}
+
+.nn-topic-graph {
+    --topic-graph-cycle: var(--text-warning);
+    --topic-graph-edge: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    background: var(--background-primary);
+}
+
+.nn-topic-graph-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--size-4-4);
+    padding: var(--size-4-3) var(--size-4-5);
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.nn-topic-graph-heading h2 {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-size: var(--font-ui-large);
+}
+
+.nn-topic-graph-heading [role='status'] {
+    font-size: var(--font-ui-small);
+}
+
+.nn-topic-graph-views {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--size-4-2);
+}
+
+.nn-topic-graph-stage {
+    display: grid;
+    flex: 1 0 320px;
+    position: relative;
+    min-width: 0;
+    min-height: 320px;
+    margin: var(--size-4-3);
+}
+
+.nn-topic-graph-canvas {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-l);
+    background-color: var(--background-primary);
+    background-image: radial-gradient(circle, var(--background-modifier-border) 0.8px, transparent 0.8px);
+    background-size: 22px 22px;
+}
+
+.nn-topic-graph-canvas > svg {
+    display: block;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+    touch-action: none;
+}
+
+.nn-topic-graph-canvas > svg:active {
+    cursor: grabbing;
+}
+
+.nn-topic-graph-canvas > svg:focus-visible {
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: -2px;
+}
+
+.nn-topic-graph-edge,
+.nn-topic-graph-canvas marker {
+    color: var(--topic-graph-edge);
+}
+
+.nn-topic-graph-edge.is-cyclic,
+.nn-topic-graph-canvas marker.is-cyclic {
+    color: var(--topic-graph-cycle);
+}
+
+.nn-topic-graph-canvas marker path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.nn-topic-graph-edge-line {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+
+.nn-topic-graph-edge.is-cyclic .nn-topic-graph-edge-line {
+    stroke-width: 2.2;
+}
+
+.nn-topic-graph-edge-target {
+    fill: none;
+    stroke: transparent;
+    stroke-width: 14;
+    vector-effect: non-scaling-stroke;
+    pointer-events: stroke;
+    cursor: pointer;
+}
+
+.nn-topic-graph-edge:is(:hover, :focus-within, .is-selected) .nn-topic-graph-edge-line {
+    stroke-width: 2.8;
+}
+
+.nn-topic-graph-edge-action {
+    visibility: hidden;
+}
+
+.nn-topic-graph-edge:is(:hover, :focus-within, .is-selected) .nn-topic-graph-edge-action {
+    visibility: visible;
+}
+
+.nn-topic-graph-edge-action button {
+    width: 32px;
+    height: 32px;
+    margin: 2px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-primary);
+    box-shadow: var(--shadow-s);
+    color: var(--text-error);
+}
+
+.nn-topic-graph-node {
+    --topic-card-fill: var(--background-secondary);
+    --topic-card-border: var(--background-modifier-border);
+    --topic-card-highlight: var(--interactive-accent);
+    cursor: pointer;
+}
+
+.nn-topic-graph-node.is-cyclic {
+    --topic-card-fill: color-mix(in srgb, var(--topic-graph-cycle) 12%, var(--background-primary));
+    --topic-card-border: color-mix(in srgb, var(--topic-graph-cycle) 55%, var(--background-modifier-border));
+    --topic-card-highlight: var(--topic-graph-cycle);
+}
+
+.nn-topic-graph-node rect {
+    fill: var(--topic-card-fill);
+    stroke: var(--topic-card-border);
+    stroke-width: 1.2;
+}
+
+.nn-topic-graph-node:is(:hover, :focus-visible) rect {
+    stroke: var(--topic-card-highlight);
+    stroke-width: 2;
+}
+
+.nn-topic-graph-node.is-drag-source {
+    opacity: 0.65;
+    cursor: grabbing;
+}
+
+.nn-topic-graph-node.is-drop-target rect {
+    fill: var(--background-modifier-hover);
+    stroke: var(--interactive-accent);
+    stroke-width: 2.5;
+}
+
+.nn-topic-graph-node-label {
+    pointer-events: none;
+}
+
+.nn-topic-graph-node-label div {
+    display: block;
+    box-sizing: border-box;
+    height: 100%;
+    align-content: center;
+    padding-inline: 12px;
+    overflow: hidden;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-medium);
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nn-topic-graph-edge-target:focus-visible,
+.nn-topic-graph-node:focus-visible {
+    outline: none;
+}
+
+.nn-topic-graph-zoom {
+    display: flex;
+    position: absolute;
+    inset-inline-end: var(--size-4-3);
+    inset-block-end: var(--size-4-3);
+    gap: var(--size-2-1);
+    padding: var(--size-2-2);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-primary);
+}
+
+.nn-topic-graph-empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+}
+
+.nn-topic-graph-empty button {
+    pointer-events: auto;
+}
+
+.nn-topic-graph-message {
+    margin: 0;
+    padding: var(--size-4-3) var(--size-4-5);
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+p.nn-topic-graph-message {
+    color: var(--text-error);
 }

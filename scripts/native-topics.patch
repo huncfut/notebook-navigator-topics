@@ -1136,7 +1136,7 @@
          parsedExcludedFolders,
 --- a/src/hooks/navigationPane/useNavigationPaneTreeInteractions.ts
 +++ b/src/hooks/navigationPane/useNavigationPaneTreeInteractions.ts
-@@ -16,9 +16,18 @@
+@@ -16,9 +16,19 @@
   * along with this program.  If not, see <https://www.gnu.org/licenses/>.
   */
  
@@ -1146,7 +1146,8 @@
 -import { App, TFile, TFolder } from 'obsidian';
 +import { App, Menu, TFile, TFolder, type PaneType, type Plugin } from 'obsidian';
 +import { getTopicsController, reportTopicsError } from '../../topics/controller';
-+import { openCycleRepair, openTopicsSettings } from '../../topics/modals';
++import { openTopicsSettings } from '../../topics/modals';
++import { openTopicGraph } from '../../topics/topic-graph-workspace';
 +import { topicOccurrenceId, type TopicItem } from '../../topics/navigation';
 +import type { VirtualFolderItem } from '../../types/virtualization';
 +import type { TopicsConfig } from '../../topics/config';
@@ -1156,7 +1157,7 @@
  import type { IPropertyTreeProvider } from '../../interfaces/IPropertyTreeProvider';
  import type { NotebookNavigatorSettings } from '../../settings/types';
  import type { CommandQueueService } from '../../services/CommandQueueService';
-@@ -68,6 +77,8 @@
+@@ -68,6 +78,8 @@
  
  interface UseNavigationPaneTreeInteractionsProps {
      app: App;
@@ -1165,7 +1166,7 @@
      commandQueue: CommandQueueService | null;
      settings: NotebookNavigatorSettings;
      uiState: UIStateLike;
-@@ -85,10 +96,15 @@
+@@ -85,10 +97,15 @@
      clearActiveShortcut: () => void;
      openFolderNoteInRightSidebar: (folderNote: TFile) => Promise<void>;
      onModifySearchWithTag: (tag: string, operator: InclusionOperator) => void;
@@ -1181,7 +1182,7 @@
      handleFolderToggle: (path: string) => void;
      handleFolderClick: (folder: TFolder, options?: { fromShortcut?: boolean }) => void;
      handleFolderNameClick: (folder: TFolder, event?: React.MouseEvent<HTMLSpanElement>) => void;
-@@ -108,6 +124,8 @@
+@@ -108,6 +125,8 @@
  
  export function useNavigationPaneTreeInteractions({
      app,
@@ -1190,7 +1191,7 @@
      commandQueue,
      settings,
      uiState,
-@@ -125,7 +143,8 @@
+@@ -125,7 +144,8 @@
      clearActiveShortcut,
      openFolderNoteInRightSidebar,
      onModifySearchWithTag,
@@ -1200,7 +1201,7 @@
  }: UseNavigationPaneTreeInteractionsProps): NavigationPaneTreeInteractionsResult {
      const focusListPaneAfterRightSidebarFolderNoteSelection = useCallback(
          (openContext: FolderNoteOpenContext) => {
-@@ -533,6 +552,111 @@
+@@ -533,6 +553,111 @@
          [clearActiveShortcut, focusAfterTreeSelection, settings.autoExpandNavItems, uiDispatch, uiState.singlePane]
      );
  
@@ -1271,7 +1272,7 @@
 +            return {
 +                actionLabel: 'Repair topic cycles',
 +                icon: 'lucide-triangle-alert',
-+                onClick: () => openCycleRepair(getTopicsController(plugin), topic.sectionId),
++                onClick: () => openTopicGraph(getTopicsController(plugin), topic.sectionId),
 +                persistent: true
 +            };
 +        }
@@ -1302,7 +1303,7 @@
 +                    item
 +                        .setTitle('Repair topic cycles')
 +                        .setIcon('triangle-alert')
-+                        .onClick(() => openCycleRepair(controller, topic.sectionId))
++                        .onClick(() => openTopicGraph(controller, topic.sectionId))
 +                );
 +            }
 +        }
@@ -1312,7 +1313,7 @@
      const handleTagClick = useCallback(
          (tagPath: string, event?: React.MouseEvent, options?: { fromShortcut?: boolean }) => {
              const tagNode = findTagNode(tagTree, tagPath);
-@@ -741,6 +865,10 @@
+@@ -741,6 +866,10 @@
      );
  
      const interactions: NavigationPaneTreeInteractionsResult = {
@@ -1323,7 +1324,7 @@
          handleFolderToggle,
          handleFolderClick,
          handleFolderNameClick,
-@@ -760,6 +888,10 @@
+@@ -760,6 +889,10 @@
  
      // Identity-stable facade; calls forward to the latest handlers through a ref
      return useStableHandlerFacade(interactions, [
@@ -2458,16 +2459,17 @@
          selectionState.selectionType,
 --- a/src/main.ts
 +++ b/src/main.ts
-@@ -16,6 +16,8 @@
+@@ -16,6 +16,9 @@
   * along with this program.  If not, see <https://www.gnu.org/licenses/>.
   */
  
 +import { getTopicsController } from './topics/controller';
 +import { registerTopicsStyles } from './topics/styles';
++import { TOPIC_GRAPH_VIEW } from './topics/topic-graph-workspace';
  import { App, Platform, Plugin, TFile, FileView, TFolder, WorkspaceLeaf, addIcon } from 'obsidian';
  import type { NotebookNavigatorSettings } from './settings/types';
  import { LazyNotebookNavigatorSettingTab } from './settings/LazyNotebookNavigatorSettingTab';
-@@ -428,6 +430,8 @@
+@@ -428,6 +431,8 @@
       * Plugin initialization - called when plugin is enabled
       */
      async onload() {
@@ -2476,6 +2478,16 @@
          // Initialize localStorage before database so version checks work
          localStorage.init(this.app);
          this.debugLoggingService = new DebugLoggingService(this.app, { pluginVersion: this.manifest.version });
+@@ -820,4 +825,9 @@
+         // Register view
++        this.registerView(TOPIC_GRAPH_VIEW, leaf => {
++            // eslint-disable-next-line @typescript-eslint/no-require-imports -- Obsidian registerView callbacks must construct views synchronously.
++            const { TopicGraphView } = require('./topics/topic-graph-view') as typeof import('./topics/topic-graph-view');
++            return new TopicGraphView(leaf, getTopicsController(this));
++        });
+         this.registerView(NOTEBOOK_NAVIGATOR_VIEW, leaf => {
+             // eslint-disable-next-line @typescript-eslint/no-require-imports -- Obsidian registerView callbacks must construct views synchronously.
+             const { NotebookNavigatorView } = require('./view/NotebookNavigatorView') as typeof import('./view/NotebookNavigatorView');
 --- a/src/settings/tabs/PropertiesTab.ts
 +++ b/src/settings/tabs/PropertiesTab.ts
 @@ -16,6 +16,8 @@

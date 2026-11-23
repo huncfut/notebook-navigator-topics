@@ -1,0 +1,113 @@
+import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { reportTopicsError, type TopicsController } from './controller';
+import type { TopicLink } from './graph';
+import { TopicGraphCanvas } from './topic-graph-canvas';
+import { buildTopicGraphDisplay, fullTopicGraphView, getTopicGraphView, type TopicGraphViewMode } from './topic-graph-data';
+
+type Save = (allowCycle: boolean) => Promise<'saved' | 'cycle'>;
+
+export function TopicGraphPanel({ controller, sectionId }: { controller: TopicsController; sectionId: string }) {
+    const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+    const section = snapshot.config.sections.find(item => item.id === sectionId);
+    const graph = snapshot.graphs.get(sectionId);
+    const display = useMemo(() => graph && buildTopicGraphDisplay(graph), [graph]);
+    const [requestedView, setView] = useState<TopicGraphViewMode>(fullTopicGraphView);
+    const hasCycles = (graph?.cycles.length ?? 0) > 0;
+    const view =
+        (requestedView.kind === 'node' && !graph?.nodes.has(requestedView.path)) || (requestedView.kind === 'cycle' && !hasCycles)
+            ? fullTopicGraphView
+            : requestedView;
+    if (graph && view !== requestedView) setView(view);
+    const visibleDisplay = useMemo(() => display && getTopicGraphView(display, view), [display, view]);
+    const [pending, setPending] = useState<Save | null>(null);
+    const busyRef = useRef(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+
+    if (!snapshot.ready) return <p role="status">Loading Topic Graph…</p>;
+    if (!section || !graph || !visibleDisplay) return <p role="status">This topic section is unavailable.</p>;
+
+    async function save(operation: Save, allowCycle = false): Promise<boolean> {
+        if (busyRef.current) return false;
+        busyRef.current = true;
+        setBusy(true);
+        setError('');
+        try {
+            const result = await operation(allowCycle);
+            setPending(result === 'cycle' ? () => operation : null);
+            return result === 'saved';
+        } catch (error) {
+            setPending(null);
+            setError(error instanceof Error ? error.message : 'The link could not be saved.');
+            return false;
+        } finally {
+            busyRef.current = false;
+            setBusy(false);
+        }
+    }
+
+    function edit(link: TopicLink, operation: 'add' | 'remove') {
+        return save(allowCycle => controller.editParent(sectionId, link.child, link.parent, operation, allowCycle));
+    }
+
+    return (
+        <div className="nn-topic-graph" aria-busy={busy}>
+            <header className="nn-topic-graph-toolbar">
+                <div className="nn-topic-graph-heading">
+                    <h2>{section.name}</h2>
+                    <span role="status" className={hasCycles ? 'nn-topics-warning' : undefined}>
+                        {hasCycles ? 'Cycles detected' : 'No cycles detected.'}
+                    </span>
+                </div>
+                <div className="nn-topic-graph-views" role="group" aria-label="Graph view">
+                    <button type="button" disabled={view.kind === 'full'} onClick={() => setView(fullTopicGraphView)}>
+                        Back to full
+                    </button>
+                    <button
+                        type="button"
+                        disabled={!hasCycles}
+                        aria-pressed={view.kind === 'cycle'}
+                        onClick={() => {
+                            if (view.kind !== 'cycle') setView({ kind: 'cycle' });
+                        }}
+                    >
+                        Cycle view
+                    </button>
+                </div>
+            </header>
+            {error && (
+                <p className="nn-topic-graph-message" role="alert">
+                    {error}
+                </p>
+            )}
+            {pending && (
+                <div className="nn-topic-graph-message nn-topics-warning">
+                    <p role="alert">This change would create a cycle.</p>
+                    <div className="nn-topics-actions">
+                        <button type="button" disabled={busy} onClick={() => void save(pending, true)}>
+                            Save anyway
+                        </button>
+                        <button type="button" disabled={busy} onClick={() => setPending(null)}>
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
+            <div className="nn-topic-graph-stage">
+                <TopicGraphCanvas
+                    display={visibleDisplay}
+                    view={view}
+                    onFocus={path => {
+                        if (view.kind !== 'node' || view.path !== path) setView({ kind: 'node', path });
+                    }}
+                    busy={busy || pending !== null}
+                    onConnect={(child, parent) => void edit({ child, parent }, 'add')}
+                    title={path => controller.title(path)}
+                    onOpen={path => void controller.open(path, true).catch(reportTopicsError)}
+                    onRemove={edge => edit(edge, 'remove')}
+                />
+                {graph.nodes.size === 0 && <p className="nn-topic-graph-empty">No topic nodes in this section.</p>}
+            </div>
+        </div>
+    );
+}

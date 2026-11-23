@@ -34,7 +34,11 @@ import { buildSearchableNameData, filterListPaneFiles } from '../src/hooks/listP
 import { DEFAULT_SETTINGS } from '../src/settings/defaultSettings';
 import type { IndexedDBStorage } from '../src/storage/IndexedDBStorage';
 import { createTestTFile } from './utils/createTestTFile';
-import { CycleRepair, TopicsSettings } from '../src/topics/modals';
+import { TopicsSettings } from '../src/topics/modals';
+import { graphNodeGesture, TopicGraphCanvas } from '../src/topics/topic-graph-canvas';
+import { buildTopicGraphDisplay, fullTopicGraphView, getGraphBounds, getTopicGraphView, topicCard, type TopicGraphViewMode } from '../src/topics/topic-graph-data';
+import { TopicGraphPanel } from '../src/topics/topic-graph-panel';
+import { revealTopicGraph, TOPIC_GRAPH_VIEW } from '../src/topics/topic-graph-workspace';
 import { registerTopicsStyles } from '../src/topics/styles';
 
 const section: TopicSection = {
@@ -178,6 +182,187 @@ describe('graph traversal and cycle safety', () => {
         expect(graph.parents.get('A.md')).toEqual(['B.md', 'Outside.md']);
         expect(wouldIntroduceCycle(graph, 'A.md', 'B.md')).toBe(false);
         expect(wouldIntroduceCycle(graph, 'C.md', 'Descendant.md')).toBe(true);
+    });
+
+    it('filters graph views to immediate links or cycles and excludes leaf notes', () => {
+        const graph = graphFor([
+            note('A', 'koncept', 'B', 'Parent'),
+            note('B', 'koncept', 'A'),
+            note('Self', 'koncept', 'Self'),
+            note('Child', 'koncept', 'A'),
+            note('Parent', 'koncept', 'Grandparent'),
+            note('Grandchild', 'koncept', 'Child'),
+            note('Grandparent', 'koncept', 'Third hop'),
+            note('Third hop', 'koncept'),
+            note('Isolated', 'koncept'),
+            note('Unrelated child', 'koncept', 'Unrelated parent'),
+            note('Unrelated parent', 'koncept'),
+            note('Leaf', 'notatka', 'A')
+        ]);
+        const full = buildTopicGraphDisplay(graph);
+        const cycle = getTopicGraphView(full, { kind: 'cycle' });
+        const node = getTopicGraphView(full, { kind: 'node', path: 'A.md' });
+        const names = (display: typeof full) => display.vertices.map(vertex => vertex.path).sort();
+        expect(getTopicGraphView(full, fullTopicGraphView)).toBe(full);
+        expect(names(full)).toContain('Unrelated child.md');
+        expect(names(full)).not.toContain('Leaf.md');
+        expect(names(cycle)).toEqual(['A.md', 'B.md', 'Self.md']);
+        expect(names(node)).toEqual(['A.md', 'B.md', 'Child.md', 'Parent.md']);
+        expect(node.center).toEqual(full.vertices.find(vertex => vertex.path === 'A.md')?.position);
+        expect(node.edges.map(edge => [edge.child, edge.parent])).toEqual([
+            ['A.md', 'B.md'], ['A.md', 'Parent.md'], ['B.md', 'A.md'], ['Child.md', 'A.md']
+        ]);
+        expect(getTopicGraphView(full, { kind: 'node', path: 'Isolated.md' }).vertices.map(vertex => vertex.path)).toEqual(['Isolated.md']);
+        expect(getTopicGraphView(full, { kind: 'node', path: 'Missing.md' })).toBe(full);
+        expect(cycle.edges).toHaveLength(3);
+        const [forward, reverse, loop] = cycle.edges;
+        expect(forward.action).not.toEqual(reverse.action);
+        expect(loop.path).toContain(' C ');
+        expect(full.edges.every(edge => !edge.path.includes('NaN'))).toBe(true);
+    });
+
+    it('omits a non-cyclic link between separate cycles in Cycle view', () => {
+        const full = buildTopicGraphDisplay(graphFor([note('A', 'koncept', 'A', 'B'), note('B', 'koncept', 'B')]));
+        const cycle = getTopicGraphView(full, { kind: 'cycle' });
+        expect(cycle.edges).toHaveLength(2);
+        expect(cycle.edges.every(edge => edge.cyclic && edge.child === edge.parent)).toBe(true);
+    });
+
+    it('draws arrows from parents on the left to children on the right without overlapping cards', () => {
+        const notes = [
+            note('A', 'koncept', 'A', 'B', 'Parent'),
+            note('B', 'koncept', 'A', 'C'),
+            note('C', 'koncept', 'C', 'Parent'),
+            note('Child', 'koncept', 'A', 'Parent'),
+            note('Sibling', 'koncept', 'Parent'),
+            note('Parent', 'koncept'),
+            note('Disconnected', 'koncept', 'Other'),
+            note('Other', 'koncept')
+        ];
+        const display = buildTopicGraphDisplay(graphFor(notes));
+        expect(buildTopicGraphDisplay(graphFor([...notes].reverse()))).toEqual(display);
+
+        const positions = new Map(display.vertices.map(vertex => [vertex.path, vertex.position]));
+        for (const edge of display.edges.filter(edge => !edge.cyclic)) {
+            const parent = positions.get(edge.parent)!;
+            const child = positions.get(edge.child)!;
+            expect(parent.x).toBeLessThan(child.x);
+            expect(edge.route[0].x).toBe(parent.x + topicCard.width / 2);
+            expect(edge.route.at(-1)!.x).toBe(child.x - topicCard.width / 2 - 4);
+        }
+        expect(positions.get('Disconnected.md')!.y).toBeGreaterThan(positions.get('Parent.md')!.y);
+
+        for (const [index, vertex] of display.vertices.entries()) {
+            for (const other of display.vertices.slice(index + 1)) {
+                expect(
+                    Math.abs(vertex.position.x - other.position.x) >= topicCard.width ||
+                        Math.abs(vertex.position.y - other.position.y) >= topicCard.height
+                ).toBe(true);
+            }
+        }
+        const shortcut = display.edges.find(edge => edge.child === 'A.md' && edge.parent === 'Parent.md')!;
+        const [, , start, end] = shortcut.route;
+        const intermediate = positions.get('B.md')!;
+        expect(start.y).toBe(end.y);
+        expect(start.y).toBeLessThan(intermediate.y - topicCard.height / 2);
+        expect(start.x).toBeLessThan(intermediate.x - topicCard.width / 2);
+        expect(end.x).toBeGreaterThan(intermediate.x + topicCard.width / 2);
+
+        const cycleEdges = display.edges.filter(edge => edge.cyclic);
+        expect(new Set(cycleEdges.map(edge => JSON.stringify(edge.action))).size).toBe(cycleEdges.length);
+        const bounds = getGraphBounds(display.vertices, display.edges);
+        for (const { x, y } of display.edges.flatMap(edge => edge.route)) {
+            expect(Math.abs(x - bounds.x)).toBeLessThan(bounds.width / 2);
+            expect(Math.abs(y - bounds.y)).toBeLessThan(bounds.height / 2);
+        }
+    });
+
+    it('aligns parentless notes in the leftmost column across branches and components', () => {
+        const graph = graphFor([
+            note('Deep root', 'koncept'),
+            note('Short root', 'koncept'),
+            note('Middle', 'koncept', 'Deep root'),
+            note('Shared child', 'koncept', 'Middle', 'Short root'),
+            note('Independent root', 'koncept'),
+            note('Independent child', 'koncept', 'Independent root'),
+            note('Isolated', 'koncept'),
+            note('Cycle A', 'koncept', 'Cycle B'),
+            note('Cycle B', 'koncept', 'Cycle A')
+        ]);
+        const { vertices } = buildTopicGraphDisplay(graph);
+        const columns = new Map(vertices.map(vertex => [vertex.path, vertex.position.x]));
+        const left = Math.min(...columns.values());
+        for (const root of ['Deep root', 'Short root', 'Independent root', 'Isolated']) {
+            expect(columns.get(path(root))).toBe(left);
+        }
+        expect(columns.get(path('Middle'))).toBeGreaterThan(left);
+        expect(columns.get(path('Shared child'))).toBeGreaterThan(columns.get(path('Middle'))!);
+    });
+
+    it('centers a focused note while preserving its graph coordinates', () => {
+        const display = buildTopicGraphDisplay(
+            graphFor([note('A', 'koncept', 'B'), note('B', 'koncept', 'A', 'Parent'), note('Parent', 'koncept'), note('Other', 'koncept')])
+        );
+        const render = (view: TopicGraphViewMode) =>
+            renderToStaticMarkup(
+                createElement(TopicGraphCanvas, {
+                    display: getTopicGraphView(display, view),
+                    view,
+                    busy: false,
+                    title: path => path,
+                    onFocus: vi.fn(),
+                    onOpen: vi.fn(),
+                    onConnect: vi.fn(),
+                    onRemove: vi.fn(async () => true)
+                })
+            );
+        const view = { kind: 'node', path: 'B.md' } as const;
+        const focused = render(view);
+        const transform = focused.match(/<g transform="translate\(([^ ]+) ([^)]+)\) scale\(([^)]+)\)"/)!;
+        const [x, y, scale] = transform.slice(1).map(Number);
+        const center = getTopicGraphView(display, view).center!;
+        expect(x + center.x * scale).toBeCloseTo(400);
+        expect(y + center.y * scale).toBeCloseTo(300);
+        expect(focused).toContain(`rx="${topicCard.radius}"`);
+        expect(focused).toContain('Focus Parent.md');
+        expect(focused).not.toContain('Focus Other.md');
+        expect(render(fullTopicGraphView)).toContain('Focus Other.md');
+        expect(render({ kind: 'cycle' })).not.toContain('Focus Parent.md');
+    });
+
+    it('reduces avoidable crossings without changing the columns of any note', () => {
+        const graph = graphFor([
+            note('A', 'koncept', 'Y'),
+            note('B', 'koncept', 'X'),
+            note('C', 'koncept', 'X', 'Y'),
+            note('X', 'koncept', 'Top'),
+            note('Y', 'koncept', 'Top'),
+            note('Top', 'koncept')
+        ]);
+        const original = buildTopicGraphDisplay(graph, false);
+        const optimized = buildTopicGraphDisplay(graph);
+        function crossings({ edges }: typeof original): number {
+            return edges.reduce((count, edge, index) => {
+                const [first, last] = [edge.route[0], edge.route.at(-1)!];
+                for (const other of edges.slice(index + 1)) {
+                    const [left, right] = [other.route[0], other.route.at(-1)!];
+                    if (first.x === left.x && last.x === right.x && (first.y - left.y) * (last.y - right.y) < 0) count++;
+                }
+                return count;
+            }, 0);
+        }
+        expect(original.vertices.map(vertex => vertex.position.x)).toEqual(optimized.vertices.map(vertex => vertex.position.x));
+        expect(crossings(original)).toBeGreaterThan(0);
+        expect(crossings(optimized)).toBe(0);
+    });
+
+    it('opens on Shift-click and connects the dragged child to its drop target', () => {
+        expect(graphNodeGesture('A', 'A', false, false)).toEqual({ action: 'focus', child: 'A' });
+        expect(graphNodeGesture('A', 'A', false, true)).toEqual({ action: 'open', child: 'A' });
+        expect(graphNodeGesture('A', 'B', true, false)).toEqual({ action: 'connect', child: 'A', parent: 'B' });
+        expect(graphNodeGesture('A', 'A', true, false)).toBeUndefined();
+        expect(graphNodeGesture('A', undefined, true, false)).toBeUndefined();
+        expect(graphNodeGesture('A', 'B', false, false)).toBeUndefined();
     });
 
     it('predicts added cycles without treating a shared descendant as a cycle', () => {
@@ -637,6 +822,9 @@ describe('Obsidian integration', () => {
             await vault.controller.editParent(section.id, 'Music.md', 'Audio.md', 'remove');
             expect(vault.frontmatter.get('Music.md')).toEqual({ Typ: 'koncept' });
             expect(vault.controller.getSnapshot().graphs.get(section.id)?.cycles).toEqual([]);
+            const repaired = renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id }));
+            expect(repaired).toContain('No cycles detected.');
+            expect(repaired).toMatch(/<button[^>]*disabled=[^>]*>Cycle view<\/button>/);
         } finally {
             vault.cleanup();
             vi.useRealTimers();
@@ -653,16 +841,53 @@ describe('Obsidian integration', () => {
             expect(settings).toContain('New tab');
             expect(settings).toContain('Powiązane');
             expect(settings).toContain('Pracuje w');
-            expect(settings).toContain('Topic links form a cycle. Open repair tool');
-            expect(settings).toContain('Manage parent links');
-            const repair = renderToStaticMarkup(createElement(CycleRepair, { controller: vault.controller, sectionId: section.id }));
-            expect(repair).toContain('title="Loop.md"');
-            expect(repair).toContain('Remove link');
-            expect(repair).toContain('Add link');
+            expect(settings).toContain('Topic links form a cycle. Open Topic Graph');
+            expect(settings).toContain('Open Topic Graph');
+            const repair = renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id }));
+            expect(repair).toContain('<title>Loop.md</title>');
+            expect(repair).toContain('Remove link Loop → Loop');
+            expect(repair).toMatch(/<button[^>]*disabled=""[^>]*>Back to full<\/button>/);
+            expect(repair).toContain('aria-pressed="false">Cycle view');
+            expect(repair).toContain('is-cyclic');
+            expect(repair).toContain('marker-end=');
+            expect(repair).toContain('Focus Music.md');
+            expect(repair).not.toContain('nn-topic-graph-editor');
             expect(repair).not.toContain('Venue.md');
-            const healthy = renderToStaticMarkup(createElement(CycleRepair, { controller: vault.controller, sectionId: organizations.id }));
+            const healthy = renderToStaticMarkup(
+                createElement(TopicGraphPanel, { controller: vault.controller, sectionId: organizations.id })
+            );
             expect(healthy).toContain('No cycles detected.');
-            expect(healthy).toContain('Venue.md');
+            expect(healthy).toContain('Focus Venue.md');
+        } finally {
+            vault.cleanup();
+        }
+    });
+
+    it('opens a dedicated graph tab and reuses the one for the same section', async () => {
+        const vault = mockVault(fixtures);
+        const setViewState = vi.fn(async () => {});
+        const revealLeaf = vi.fn(async () => {});
+        const existing = { getViewState: () => ({ state: { sectionId: section.id } }) };
+        const newLeaf = { setViewState, detach: vi.fn() };
+        const getLeaf = vi.fn(() => newLeaf);
+        Object.assign(vault.controller.app.workspace, {
+            getLeavesOfType: vi.fn(() => [existing]),
+            getLeaf,
+            revealLeaf
+        });
+        try {
+            await revealTopicGraph(vault.controller, section.id);
+            expect(getLeaf).not.toHaveBeenCalled();
+            expect(revealLeaf).toHaveBeenLastCalledWith(existing);
+
+            await revealTopicGraph(vault.controller, organizations.id);
+            expect(getLeaf).toHaveBeenCalledWith('tab');
+            expect(setViewState).toHaveBeenCalledWith({
+                type: TOPIC_GRAPH_VIEW,
+                state: { sectionId: organizations.id },
+                active: true
+            });
+            expect(revealLeaf).toHaveBeenLastCalledWith(newLeaf);
         } finally {
             vault.cleanup();
         }
@@ -727,7 +952,8 @@ it('mounts bundled styles once per workspace document and removes them on window
     try {
         registerTopicsStyles(plugin);
         expect(main.head.appendChild).toHaveBeenCalledTimes(1);
-        expect(main.style.textContent).toContain('.nn-topics-modal');
+        expect(main.style.textContent).toContain('.nn-topics-settings-group');
+        expect(main.style.textContent).toContain('.nn-topic-graph-content');
         expect(popout.head.appendChild).toHaveBeenCalledTimes(1);
         callbacks.get('window-open')!(null, { document: extra });
         expect(extra.head.appendChild).toHaveBeenCalledTimes(1);
@@ -774,4 +1000,8 @@ it.skipIf(!devVault)('indexes the existing Polish development vault without modi
     expect(graph.roots.length).toBeGreaterThan(0);
     expect([...graph.children.values()].flat().length).toBeGreaterThan(0);
     expect([...graph.leaves.values()].flat().length).toBeGreaterThan(0);
-});
+    const { vertices, edges } = buildTopicGraphDisplay(graph);
+    expect(vertices).toHaveLength(graph.nodes.size);
+    expect(edges).toHaveLength([...graph.parents.values()].flat().length);
+    expect(edges.every(edge => edge.route.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y)))).toBe(true);
+}, 60_000);

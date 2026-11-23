@@ -26,10 +26,27 @@ export async function applyOverlay(directory) {
 
     const target = join(destination, 'src', 'topics');
     await mkdir(target);
-    for (const file of ['graph.ts', 'config.ts', 'controller.ts', 'browse.ts', 'modals.tsx', 'navigation.ts', 'topic-drop.ts', 'topic-filter.ts']) {
+    for (const file of [
+        'graph.ts',
+        'config.ts',
+        'controller.ts',
+        'browse.ts',
+        'modals.tsx',
+        'navigation.ts',
+        'topic-drop.ts',
+        'topic-filter.ts',
+        'topic-graph-data.ts',
+        'topic-graph-workspace.ts',
+        'topic-graph-view.tsx',
+        'topic-graph-panel.tsx',
+        'topic-graph-canvas.tsx'
+    ]) {
         await copyFile(join(project, 'src', file), join(target, file));
     }
     const css = await readFile(join(project, 'src', 'styles.css'), 'utf8');
     const styleModule = await readFile(join(project, 'src', 'styles.ts'), 'utf8');
-    await writeFile(join(target, 'styles.ts'), styleModule.replace("'__TOPICS_CSS__'", () => JSON.stringify(css)));
+    await writeFile(
+        join(target, 'styles.ts'),
+        styleModule.replace("'__TOPICS_CSS__'", () => JSON.stringify(css))
+    );
 }
