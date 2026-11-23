@@ -38,17 +38,8 @@ import { TopicsSettings } from '../src/topics/modals';
 import { graphNodeGesture, TopicGraphCanvas } from '../src/topics/topic-graph-canvas';
 import { buildTopicGraphDisplay, getGraphBounds, topicCard, type GraphDepth } from '../src/topics/topic-graph-data';
 import { TopicGraphPanel } from '../src/topics/topic-graph-panel';
-import { attachRelationshipSuggestions, relationshipEditKey, stageRelationshipEntry, TopicRelationshipEditor } from '../src/topics/topic-relationship-editor';
 import { revealTopicGraph, TOPIC_GRAPH_VIEW } from '../src/topics/topic-graph-workspace';
 import { registerTopicsStyles } from '../src/topics/styles';
-
-vi.mock('obsidian', async importOriginal => ({
-    ...(await importOriginal<typeof import('obsidian')>()),
-    AbstractInputSuggest: class {
-        open() {}
-        close() {}
-    }
-}));
 
 const section: TopicSection = {
     id: 'concepts',
@@ -298,6 +289,28 @@ describe('graph traversal and cycle safety', () => {
         }
     });
 
+    it('aligns parentless notes in the leftmost column across branches and components', () => {
+        const graph = graphFor([
+            note('Deep root', 'koncept'),
+            note('Short root', 'koncept'),
+            note('Middle', 'koncept', 'Deep root'),
+            note('Shared child', 'koncept', 'Middle', 'Short root'),
+            note('Independent root', 'koncept'),
+            note('Independent child', 'koncept', 'Independent root'),
+            note('Isolated', 'koncept'),
+            note('Cycle A', 'koncept', 'Cycle B'),
+            note('Cycle B', 'koncept', 'Cycle A')
+        ]);
+        const { vertices } = buildTopicGraphDisplay(graph);
+        const columns = new Map(vertices.map(vertex => [vertex.path, vertex.position.x]));
+        const left = Math.min(...columns.values());
+        for (const root of ['Deep root', 'Short root', 'Independent root', 'Isolated']) {
+            expect(columns.get(path(root))).toBe(left);
+        }
+        expect(columns.get(path('Middle'))).toBeGreaterThan(left);
+        expect(columns.get(path('Shared child'))).toBeGreaterThan(columns.get(path('Middle'))!);
+    });
+
     it('reveals more cards without moving the focused cycle on depth changes', () => {
         const display = buildTopicGraphDisplay(
             graphFor([note('A', 'koncept', 'B'), note('B', 'koncept', 'A', 'Parent'), note('Parent', 'koncept'), note('Other', 'koncept')])
@@ -309,8 +322,6 @@ describe('graph traversal and cycle safety', () => {
                     depth,
                     busy: false,
                     title: path => path,
-                    selectedNode: null,
-                    onSelect: vi.fn(),
                     onOpen: vi.fn(),
                     onConnect: vi.fn(),
                     onRemove: vi.fn(async () => true)
@@ -320,10 +331,10 @@ describe('graph traversal and cycle safety', () => {
         const focus = initial.match(/<g transform="[^"]+scale\([^"]+"/g)?.[0];
         expect(focus).toBeDefined();
         expect(initial).toContain(`rx="${topicCard.radius}"`);
-        expect(initial).not.toContain('Select Parent.md');
-        expect(render(1)).toContain('Select Parent.md');
+        expect(initial).not.toContain('Open Parent.md');
+        expect(render(1)).toContain('Open Parent.md');
         for (const depth of [1, 2, 3] as const) expect(render(depth)).toContain(focus!);
-        expect(render(3)).toContain('Select Other.md');
+        expect(render(3)).toContain('Open Other.md');
     });
 
     it('reduces avoidable crossings without changing the columns of any note', () => {
@@ -352,8 +363,8 @@ describe('graph traversal and cycle safety', () => {
         expect(crossings(optimized)).toBe(0);
     });
 
-    it('selects on click, opens on Shift-click, and connects the dragged child to its drop target', () => {
-        expect(graphNodeGesture('A', 'A', false, false)).toEqual({ action: 'select', child: 'A' });
+    it('opens on Shift-click and connects the dragged child to its drop target', () => {
+        expect(graphNodeGesture('A', 'A', false, false)).toBeUndefined();
         expect(graphNodeGesture('A', 'A', false, true)).toEqual({ action: 'open', child: 'A' });
         expect(graphNodeGesture('A', 'B', true, false)).toEqual({ action: 'connect', child: 'A', parent: 'B' });
         expect(graphNodeGesture('A', 'A', true, false)).toBeUndefined();
@@ -845,135 +856,14 @@ describe('Obsidian integration', () => {
             expect(repair).toContain('aria-valuetext="0"');
             expect(repair).toContain('is-cyclic');
             expect(repair).toContain('marker-end=');
-            expect(repair).not.toContain('Select Music.md');
-            expect(repair).toContain('Select a note to edit its links');
+            expect(repair).not.toContain('Open Music.md');
+            expect(repair).not.toContain('nn-topic-graph-editor');
             expect(repair).not.toContain('Venue.md');
             const healthy = renderToStaticMarkup(
                 createElement(TopicGraphPanel, { controller: vault.controller, sectionId: organizations.id })
             );
             expect(healthy).toContain('No cycles detected.');
             expect(healthy).toContain('Show full section');
-        } finally {
-            vault.cleanup();
-        }
-    });
-
-    it('renders a compact property row for a scalar, a list, and an empty property', () => {
-        const render = (value: unknown) => renderToStaticMarkup(createElement(TopicRelationshipEditor, {
-            app: {} as App,
-            notePath: 'Music.md',
-            title: 'Music',
-            relationship: { property: 'Powiązane', key: 'powiązane', value },
-            busy: false,
-            onSave: vi.fn(),
-            onCancel: vi.fn()
-        }));
-        const populated = render(['[[Audio|Sound]]', '[[Missing]]', false]);
-        expect(populated).toContain('role="group"');
-        expect(populated).toContain('>Powiązane</span>');
-        expect(populated).toContain('data-layout="list"');
-        expect(populated).toContain('title="[[Audio|Sound]]"');
-        expect(populated).toContain('Edit value 1: Sound');
-        expect(populated).toContain('title="[[Missing]]"');
-        expect(populated).toContain('Remove value 3: false');
-        expect(populated).not.toContain('type="submit"');
-        expect(populated.match(/<input\b/g)).toHaveLength(1);
-        expect(populated.indexOf('<input')).toBeGreaterThan(populated.indexOf('Remove value 3'));
-        expect(render('[[Audio]]')).toContain('data-layout="scalar"');
-        expect(render(undefined)).toContain('placeholder="Add value"');
-    });
-
-    it('stages inline values without changing the previous draft and gives the popover first use of keys', () => {
-        const original = [{ id: 0, value: '[[Old]]' }, { id: 1, value: false }];
-        const replaced = stageRelationshipEntry(original, 0, '[[New|Alias]]');
-        expect(replaced).toEqual([{ id: 0, value: '[[New|Alias]]' }, original[1]]);
-        expect(original[0].value).toBe('[[Old]]');
-        expect(stageRelationshipEntry(replaced, -1, ' ')).toBe(replaced);
-        expect(stageRelationshipEntry(replaced, -1, '[[Unresolved]]')).toEqual([
-            ...replaced, { id: -1, value: '[[Unresolved]]' }
-        ]);
-        expect(relationshipEditKey('Enter', false)).toBe('apply');
-        expect(relationshipEditKey('Escape', false)).toBe('cancel');
-        expect(relationshipEditKey('Tab', false)).toBeUndefined();
-        expect(relationshipEditKey('Enter', true)).toBeUndefined();
-        expect(relationshipEditKey('Escape', true)).toBeUndefined();
-    });
-
-    it('generates a picked note link relative to the selected graph note', () => {
-        const file = createTestTFile('Notes/Parent.md');
-        const generateMarkdownLink = vi.fn(() => '[Parent](../Notes/Parent.md)');
-        const picked = vi.fn();
-        const getMarkdownFiles = vi.fn(() => [file]);
-        const app = { vault: { getMarkdownFiles }, fileManager: { generateMarkdownLink } } as unknown as App;
-        const input = new EventTarget() as unknown as HTMLInputElement;
-        const suggest = attachRelationshipSuggestions(app, input, 'Topics/Child.md', picked);
-        expect(suggest.getSuggestions('')).toEqual([]);
-        expect(suggest.getSuggestions('Parent')).toEqual([]);
-        expect(suggest.getSuggestions('[[')).toEqual([]);
-        expect(getMarkdownFiles).not.toHaveBeenCalled();
-        input.dispatchEvent(new Event('input'));
-        expect(suggest.getSuggestions(' ')).toEqual([]);
-        expect(suggest.getSuggestions('[')).toEqual([]);
-        expect(suggest.getSuggestions('[[Parent|Alias')).toEqual([]);
-        expect(getMarkdownFiles).not.toHaveBeenCalled();
-        const options = suggest.getSuggestions('[[');
-        expect(options[0].item).toBe(file);
-        const event = { preventDefault: vi.fn() } as unknown as KeyboardEvent;
-        suggest.open();
-        expect(suggest.showing).toBe(true);
-        suggest.selectSuggestion(options[0], event);
-        expect(event.preventDefault).toHaveBeenCalledOnce();
-        expect(suggest.showing).toBe(false);
-        expect(generateMarkdownLink).toHaveBeenCalledWith(file, 'Topics/Child.md');
-        expect(picked).toHaveBeenCalledWith('[Parent](../Notes/Parent.md)');
-        suggest.reset();
-        expect(suggest.getSuggestions('[[')).toEqual([]);
-        input.dispatchEvent(new Event('input'));
-        expect(suggest.getSuggestions('[[')).toHaveLength(1);
-        suggest.dispose();
-        input.dispatchEvent(new Event('input'));
-        expect(suggest.getSuggestions('[[')).toEqual([]);
-    });
-
-    it('adds, replaces, and clears a property while preserving unrelated frontmatter and existing scalar shape', async () => {
-        const vault = mockVault([...fixtures, { path: 'Other.md', properties: { Typ: 'koncept', keep: true } }]);
-        try {
-            await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section] }));
-            const before = () => vault.controller.readRelationship(section.id, 'Other.md')!;
-            expect(before()).toMatchObject({ property: 'Powiązane', key: undefined, value: undefined });
-            await vault.controller.saveRelationship(section.id, 'Other.md', before(), ['[[Missing]]', '[[Music]]', false]);
-            expect(before().value).toEqual(['[[Missing]]', '[[Music]]', false]);
-            expect(vault.controller.getSnapshot().graphs.get(section.id)?.parents.get('Other.md')).toEqual(['Music.md']);
-            await vault.controller.saveRelationship(section.id, 'Other.md', before(), ['[[Missing]]', '[[Alex]]', false]);
-            expect(vault.frontmatter.get('Other.md')).toEqual({ Typ: 'koncept', keep: true, Powiązane: ['[[Missing]]', '[[Alex]]', false] });
-            await vault.controller.saveRelationship(section.id, 'Other.md', before(), []);
-            expect(before().value).toEqual([]);
-
-            const live = vault.controller.readRelationship(section.id, 'Live Sound.md')!;
-            vault.frontmatter.get('Live Sound.md')!.Powiązane = '[[Audio]]';
-            await vault.controller.saveRelationship(section.id, 'Live Sound.md', { ...live, value: '[[Audio]]' }, ['[[Music]]']);
-            expect(vault.frontmatter.get('Live Sound.md')!.Powiązane).toBe('[[Music]]');
-        } finally {
-            vault.cleanup();
-        }
-    });
-
-    it('protects against concurrent property edits and confirms newly introduced cycles', async () => {
-        const vault = mockVault(fixtures);
-        try {
-            await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section] }));
-            const draft = () => vault.controller.readRelationship(section.id, 'Music.md')!;
-            const stale = structuredClone(draft());
-            vault.frontmatter.get('Music.md')!.Powiązane = ['[[Unresolved]]'];
-            await expect(vault.controller.saveRelationship(section.id, 'Music.md', stale, ['[[Audio]]'])).rejects.toThrow('changed');
-            expect(vault.frontmatter.get('Music.md')!.Powiązane).toEqual(['[[Unresolved]]']);
-            const expected = { ...draft(), key: 'Powiązane', value: ['[[Unresolved]]'] };
-            const links = ['[[Unresolved]]', '[[Audio]]'];
-            expect(await vault.controller.saveRelationship(section.id, 'Music.md', expected, links)).toBe('cycle');
-            expect(vault.frontmatter.get('Music.md')!.Powiązane).toEqual(['[[Unresolved]]']);
-            expect(await vault.controller.saveRelationship(section.id, 'Music.md', expected, links, true)).toBe('saved');
-            expect(vault.controller.getSnapshot().graphs.get(section.id)?.cycles.flat()).toHaveLength(2);
-            expect(await vault.controller.saveRelationship(section.id, 'Music.md', draft(), [...links, '[[Missing]]'])).toBe('saved');
         } finally {
             vault.cleanup();
         }

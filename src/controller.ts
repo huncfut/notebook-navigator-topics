@@ -5,7 +5,6 @@ import {
     linkPath,
     propertyKey,
     propertyValues,
-    resolveParentLinks,
     wouldIntroduceCycle,
     type TopicGraph,
     type TopicNote,
@@ -23,14 +22,6 @@ export interface TopicsSnapshot {
     graphs: ReadonlyMap<string, TopicGraph>;
     ready: boolean;
 }
-
-export interface TopicRelationship {
-    property: string;
-    key: string | undefined;
-    value: unknown;
-}
-
-type RelationshipEdit = { value: unknown } | 'cycle';
 
 export class TopicsController {
     private snapshot: TopicsSnapshot = { config: defaultConfig, graphs: new Map(), ready: false };
@@ -179,48 +170,6 @@ export class TopicsController {
         }));
     }
 
-    readRelationship(sectionId: string, path: string): TopicRelationship | undefined {
-        const section = this.snapshot.config.sections.find(item => item.id === sectionId);
-        const file = this.app.vault.getFileByPath(path);
-        if (!section || !file || !this.snapshot.graphs.get(sectionId)?.nodes.has(path)) return undefined;
-        const properties = this.notes.get(path)?.properties ?? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {};
-        const key = propertyKey(properties, section.relationshipProperty);
-        return { property: section.relationshipProperty, key, value: key === undefined ? undefined : properties[key] };
-    }
-
-    saveRelationship(
-        sectionId: string,
-        child: string,
-        expected: TopicRelationship,
-        values: readonly unknown[],
-        allowCycle = false
-    ): Promise<'saved' | 'cycle'> {
-        return this.mutateRelationship(sectionId, child, (current, graph) => {
-            if (
-                current.property !== expected.property ||
-                current.key !== expected.key ||
-                JSON.stringify(current.value) !== JSON.stringify(expected.value)
-            ) {
-                throw new Error('The linking property changed while you were editing. Cancel to load the current values.');
-            }
-
-            if (JSON.stringify(propertyValues(current.value)) === JSON.stringify(values)) return { value: current.value };
-
-            const targets = (value: unknown) =>
-                resolveParentLinks({ path: child, properties: { [current.property]: value } }, current.property, this.resolveLink);
-            const previous = targets(current.value);
-            const parents = new Map(graph.parents).set(child, previous);
-            if (!allowCycle && targets(values).some(parent => wouldIntroduceCycle({ ...graph, parents }, child, parent))) return 'cycle';
-
-            return {
-                value:
-                    Array.isArray(current.value) || values.length > 1 || (current.key === undefined && values.length === 1)
-                        ? [...values]
-                        : values[0]
-            };
-        });
-    }
-
     editParent(
         sectionId: string,
         childPath: string,
@@ -228,41 +177,14 @@ export class TopicsController {
         operation: 'add' | 'remove',
         allowCycle = false
     ): Promise<'saved' | 'cycle'> {
-        return this.mutateRelationship(sectionId, childPath, (current, graph) => {
-            const parent = this.app.vault.getFileByPath(parentPath);
-            if (!parent || !graph.nodes.has(parentPath)) throw new Error('The parent note has changed. Select the note again.');
-
-            const entries = propertyValues(current.value);
-            const kept = entries.filter(value => {
-                const target = linkPath(value);
-                return !target || this.resolveLink(target, childPath) !== parentPath;
-            });
-            if (operation === 'remove' && kept.length !== entries.length) {
-                return { value: Array.isArray(current.value) ? kept : undefined };
-            }
-            if (operation === 'add' && kept.length === entries.length) {
-                const parents = graph.parents.get(childPath)?.includes(parentPath)
-                    ? new Map(graph.parents).set(childPath, [])
-                    : graph.parents;
-                if (!allowCycle && wouldIntroduceCycle({ ...graph, parents }, childPath, parentPath)) return 'cycle';
-                return { value: [...entries, this.app.fileManager.generateMarkdownLink(parent, childPath)] };
-            }
-            return { value: current.value };
-        });
-    }
-
-    private mutateRelationship(
-        sectionId: string,
-        childPath: string,
-        edit: (current: TopicRelationship, graph: TopicGraph) => RelationshipEdit
-    ): Promise<'saved' | 'cycle'> {
         return this.enqueue(async () => {
             this.refresh();
             const section = this.snapshot.config.sections.find(item => item.id === sectionId);
             const graph = this.snapshot.graphs.get(sectionId);
             const child = this.app.vault.getFileByPath(childPath);
-            if (!section || !graph?.nodes.has(childPath) || !child) {
-                throw new Error('The section or note has changed. Select the note again.');
+            const parent = this.app.vault.getFileByPath(parentPath);
+            if (!section || !graph?.nodes.has(childPath) || !graph.nodes.has(parentPath) || !child || !parent) {
+                throw new Error('The section or one of its notes has changed.');
             }
 
             const cycle = new Error('Topic link would create a cycle.');
@@ -272,13 +194,24 @@ export class TopicsController {
                     const property = section.relationshipProperty;
                     const key = propertyKey(properties, property);
                     const current = key === undefined ? undefined : properties[key];
-                    const next = edit({ property, key, value: current }, graph);
-                    if (next === 'cycle') throw cycle;
-                    if (next.value === current) return;
-                    if (next.value === undefined && key !== undefined) delete properties[key];
-                    else {
+                    const entries = propertyValues(current);
+                    const kept = entries.filter(value => {
+                        const target = linkPath(value);
+                        return !target || this.resolveLink(target, childPath) !== parentPath;
+                    });
+
+                    if (operation === 'remove') {
+                        if (key === undefined || kept.length === entries.length) return;
+                        if (Array.isArray(current)) properties[key] = kept;
+                        else delete properties[key];
+                    } else {
+                        if (kept.length !== entries.length) return;
+                        const parents = graph.parents.get(childPath)?.includes(parentPath)
+                            ? new Map(graph.parents).set(childPath, [])
+                            : graph.parents;
+                        if (!allowCycle && wouldIntroduceCycle({ ...graph, parents }, childPath, parentPath)) throw cycle;
                         Object.defineProperty(properties, key ?? property, {
-                            value: next.value,
+                            value: [...entries, this.app.fileManager.generateMarkdownLink(parent, childPath)],
                             writable: true,
                             configurable: true,
                             enumerable: true

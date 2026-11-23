@@ -11,8 +11,7 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     color: var(--text-warning);
 }
 
-.nn-topics-settings-group,
-.nn-topic-graph-editor fieldset {
+.nn-topics-settings-group {
     margin: 0;
     padding: 0;
     min-width: 0;
@@ -237,7 +236,7 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     stroke-width: 1.2;
 }
 
-.nn-topic-graph-node:is(:hover, :focus-visible, .is-selected) rect {
+.nn-topic-graph-node:is(:hover, :focus-visible) rect {
     stroke: var(--topic-card-highlight);
     stroke-width: 2;
 }
@@ -301,156 +300,12 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     pointer-events: auto;
 }
 
-.nn-topic-graph-message,
-.nn-topic-graph-help,
-.nn-topic-graph-editor {
+.nn-topic-graph-message {
     margin: 0;
     padding: var(--size-4-3) var(--size-4-5);
     border-top: 1px solid var(--background-modifier-border);
 }
 
-.nn-topic-graph-help {
-    color: var(--text-muted);
-    font-size: var(--font-ui-small);
-}
-
-.nn-topic-graph-message {
+p.nn-topic-graph-message {
     color: var(--text-error);
-}
-
-.nn-topic-graph-editor {
-    container-type: inline-size;
-    background: var(--background-secondary);
-}
-
-.nn-topic-graph-editor h3 {
-    margin: 0 0 var(--size-4-2);
-    font-size: var(--font-ui-small);
-    font-weight: var(--font-medium);
-    color: var(--text-muted);
-    overflow-wrap: anywhere;
-}
-
-.nn-topic-graph-property-row {
-    display: grid;
-    grid-template-columns: minmax(0, min(var(--metadata-label-width, 9em), 45%)) minmax(0, 1fr);
-    align-items: start;
-    column-gap: var(--size-4-2);
-    max-inline-size: 42rem;
-    border-block-end: var(--metadata-divider-width, 1px) solid var(--metadata-divider-color, var(--background-modifier-border));
-    background: var(--metadata-property-background, transparent);
-}
-
-.nn-topic-graph-property-row:focus-within {
-    border-color: var(--metadata-divider-color-focus, var(--background-modifier-border-focus));
-    background: var(--metadata-property-background-active, transparent);
-}
-
-.nn-topic-graph-property-key,
-.nn-topic-graph-property-values {
-    display: flex;
-    align-items: center;
-    min-block-size: var(--metadata-input-height, 28px);
-    gap: var(--size-4-2);
-}
-
-.nn-topic-graph-property-key {
-    min-width: 0;
-    color: var(--metadata-label-text-color, var(--text-muted));
-    font-size: var(--metadata-sidebar-label-font-size, var(--font-ui-small));
-    font-weight: var(--metadata-label-font-weight, var(--font-medium));
-}
-
-.nn-topic-graph-property-key > span:first-child {
-    display: flex;
-    flex: none;
-}
-
-.nn-topic-graph-property-key > span:last-child {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.nn-topic-graph-property-values {
-    flex-wrap: wrap;
-    column-gap: var(--size-4-2);
-    color: var(--metadata-input-text-color, var(--text-normal));
-    font-size: var(--metadata-sidebar-input-font-size, var(--font-ui-small));
-}
-
-.nn-topic-graph-value {
-    display: inline-flex;
-    align-items: center;
-    max-width: 100%;
-    min-width: 0;
-}
-
-.nn-topic-graph-value .nn-topic-graph-value-text {
-    display: block;
-    min-width: 0;
-    height: auto;
-    padding: var(--size-2-1) 0;
-    overflow: hidden;
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-    color: inherit;
-    font: inherit;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.nn-topic-graph-value[data-link='true'] .nn-topic-graph-value-text {
-    color: var(--link-color);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-}
-
-button.nn-topic-graph-value-text:not(:disabled):hover {
-    text-decoration: underline;
-}
-
-.nn-topic-graph-value-remove {
-    flex: none;
-    min-height: 22px;
-    color: var(--text-muted);
-}
-
-.nn-topic-graph-value-remove svg {
-    width: var(--icon-xs, 12px);
-    height: var(--icon-xs, 12px);
-}
-
-.nn-topic-graph-property-values input.nn-topic-graph-value-input {
-    flex: 1 1 5em;
-    min-width: 5em;
-    max-width: 100%;
-    min-block-size: var(--metadata-input-height, 28px);
-    height: auto;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-    color: inherit;
-    font: inherit;
-}
-
-.nn-topic-graph-value-input::placeholder {
-    color: var(--text-faint);
-}
-
-.nn-topic-graph-editor-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--size-4-2);
-    margin-block-start: var(--size-4-2);
-}
-
-@container (max-width: 300px) {
-    .nn-topic-graph-property-row {
-        grid-template-columns: minmax(0, 1fr);
-        gap: 0;
-    }
 }

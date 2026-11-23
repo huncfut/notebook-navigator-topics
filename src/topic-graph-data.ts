@@ -132,13 +132,13 @@ function minimizeCrossings(component: Block[], parentsByPath: ReadonlyMap<string
     const incoming = new Map<Block, Block[]>();
     const outgoing = new Map<Block, Block[]>();
     let span = 0;
-    for (const from of component) {
-        for (const [offset, path] of from.paths.entries()) {
+    for (const to of component) {
+        for (const [offset, path] of to.paths.entries()) {
             for (const parent of parentsByPath.get(path) ?? []) {
-                const to = byPath.get(parent)!;
+                const from = byPath.get(parent)!;
                 if (from === to) continue;
-                const start = from.column + offset;
-                const end = to.column + to.paths.indexOf(parent);
+                const start = from.column + from.paths.indexOf(parent);
+                const end = to.column + offset;
                 span += end - start;
                 // Bound the number of projected segments for unusually dense sections.
                 if (span > 20_000) return;
@@ -219,7 +219,7 @@ function layoutBlocks(graph: TopicGraph, links: TopicLink[], reduceCrossings: bo
 
     for (const cycle of graph.cycles) {
         const paths = [...new Set(cycle.map(link => link.child))].sort();
-        addBlock(orderCycle(paths, graph), true);
+        addBlock(orderCycle(paths, graph).reverse(), true);
     }
     for (const path of [...graph.nodes].sort()) {
         if (!byPath.has(path)) addBlock([path], false);
@@ -253,28 +253,26 @@ function layoutBlocks(graph: TopicGraph, links: TopicLink[], reduceCrossings: bo
     const grid = new Map<string, GridPosition>();
     let firstRow = 0;
     for (const component of components) {
-        const indegrees = new Map(component.map(block => [block, block.children.size]));
-        const ready = component.filter(block => block.children.size === 0);
+        const indegrees = new Map(component.map(block => [block, block.parents.size]));
+        const ready = component.filter(block => block.parents.size === 0);
         const nextRow = new Map<number, number>();
         let lastRow = firstRow;
         for (const block of ready) {
             const endColumn = block.column + block.paths.length;
-            const children = [...block.children];
-            const preferred = children.length
-                ? Math.round(children.reduce((sum, child) => sum + child.row, 0) / children.length)
-                : firstRow;
+            const parents = [...block.parents];
+            const preferred = parents.length ? Math.round(parents.reduce((sum, parent) => sum + parent.row, 0) / parents.length) : firstRow;
             block.row = preferred;
             for (let column = block.column; column < endColumn; column++) {
                 block.row = Math.max(block.row, nextRow.get(column) ?? firstRow);
             }
             for (let column = block.column; column < endColumn; column++) nextRow.set(column, block.row + 1);
             lastRow = Math.max(lastRow, block.row);
-            for (const parent of block.parents) {
-                // A cycle block spans one column per member. External links clear the entire block.
-                parent.column = Math.max(parent.column, endColumn);
-                const remaining = indegrees.get(parent)! - 1;
-                indegrees.set(parent, remaining);
-                if (remaining === 0) ready.push(parent);
+            // Start all parentless blocks in column zero and place children after every parent block.
+            for (const child of block.children) {
+                child.column = Math.max(child.column, endColumn);
+                const remaining = indegrees.get(child)! - 1;
+                indegrees.set(child, remaining);
+                if (remaining === 0) ready.push(child);
             }
         }
         if (reduceCrossings) minimizeCrossings(component, graph.parents, byPath);
@@ -294,15 +292,15 @@ function routePositions(grid: ReadonlyMap<string, GridPosition>, links: TopicLin
     const loopRows = new Set<number>();
     const spans = links
         .flatMap(link => {
-            const source = grid.get(link.child)!;
-            const target = grid.get(link.parent)!;
+            const source = grid.get(link.parent)!;
+            const target = grid.get(link.child)!;
             const distance = target.column - source.column;
             if (distance === 0) loopRows.add(source.row);
             if (distance === 0 || distance === 1) return [];
             return [
                 {
                     id: edgeId(link),
-                    row: source.row,
+                    row: target.row,
                     side: distance < 0 ? ('below' as const) : ('above' as const),
                     start: Math.min(source.column, target.column),
                     end: Math.max(source.column, target.column)
@@ -333,8 +331,7 @@ function routePositions(grid: ReadonlyMap<string, GridPosition>, links: TopicLin
         nextTop = center + below + 16;
         previousRow = row;
     }
-    // Ranking follows the stored child-to-parent links. The visible graph reads from parents to children.
-    const positions = new Map([...grid].map(([path, { column, row }]) => [path, { x: -column * columnGap, y: rowCenters.get(row)! }]));
+    const positions = new Map([...grid].map(([path, { column, row }]) => [path, { x: column * columnGap, y: rowCenters.get(row)! }]));
     return { positions, detours };
 }
 

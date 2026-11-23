@@ -29,8 +29,6 @@ interface GraphCanvasProps {
     depth: GraphDepth;
     busy: boolean;
     title: (path: string) => string;
-    selectedNode: string | null;
-    onSelect: (path: string) => void;
     onOpen: (path: string) => void;
     onConnect: (child: string, parent: string) => void;
     onRemove: (edge: GraphEdge) => Promise<boolean>;
@@ -57,10 +55,10 @@ interface PointerStart {
 
 export function graphNodeGesture(child: string, target: string | undefined, moved: boolean, shift: boolean) {
     if (moved) return target && target !== child ? { action: 'connect' as const, child, parent: target } : undefined;
-    return target === child ? { action: shift ? ('open' as const) : ('select' as const), child } : undefined;
+    return shift && target === child ? { action: 'open' as const, child } : undefined;
 }
 
-export function TopicGraphCanvas({ display, depth, busy, title, selectedNode, onSelect, onOpen, onConnect, onRemove }: GraphCanvasProps) {
+export function TopicGraphCanvas({ display, depth, busy, title, onOpen, onConnect, onRemove }: GraphCanvasProps) {
     const svg = useRef<SVGSVGElement>(null);
     const drag = useRef<PointerStart | null>(null);
     const [connection, setConnection] = useState<{ child: string; target: string | undefined } | null>(null);
@@ -182,7 +180,6 @@ export function TopicGraphCanvas({ display, depth, busy, title, selectedNode, on
         const target = nodeAt(canvas.ownerDocument.elementFromPoint(event.clientX, event.clientY), canvas);
         const gesture = graphNodeGesture(pointer.node, target, pointerMoved(pointer, event), event.shiftKey);
         if (gesture?.action === 'connect' && !busy) onConnect(gesture.child, gesture.parent);
-        if (gesture?.action === 'select') onSelect(gesture.child);
         if (gesture?.action === 'open') onOpen(gesture.child);
     }
 
@@ -279,7 +276,6 @@ export function TopicGraphCanvas({ display, depth, busy, title, selectedNode, on
                         const label = title(vertex.path);
                         const className = ['nn-topic-graph-node'];
                         if (vertex.depth === 0) className.push('is-cyclic');
-                        if (vertex.path === selectedNode) className.push('is-selected');
                         if (vertex.path === connection?.child) className.push('is-drag-source');
                         if (vertex.path === connection?.target) className.push('is-drop-target');
                         return (
@@ -290,13 +286,11 @@ export function TopicGraphCanvas({ display, depth, busy, title, selectedNode, on
                                 transform={`translate(${vertex.position.x} ${vertex.position.y})`}
                                 role="button"
                                 tabIndex={0}
-                                aria-label={`Select ${vertex.path}`}
-                                aria-pressed={vertex.path === selectedNode}
-                                aria-keyshortcuts="Shift+Enter"
+                                aria-label={`Open ${vertex.path}`}
                                 onClick={event => {
-                                    if (event.detail === 0) (event.shiftKey ? onOpen : onSelect)(vertex.path);
+                                    if (event.detail === 0) onOpen(vertex.path);
                                 }}
-                                onKeyDown={event => activate(event, () => (event.shiftKey ? onOpen : onSelect)(vertex.path))}
+                                onKeyDown={event => activate(event, () => onOpen(vertex.path))}
                             >
                                 <title>{vertex.path}</title>
                                 <rect

@@ -39,8 +39,7 @@ export async function applyOverlay(directory) {
         'topic-graph-workspace.ts',
         'topic-graph-view.tsx',
         'topic-graph-panel.tsx',
-        'topic-graph-canvas.tsx',
-        'topic-relationship-editor.tsx'
+        'topic-graph-canvas.tsx'
     ]) {
         await copyFile(join(project, 'src', file), join(target, file));
     }
