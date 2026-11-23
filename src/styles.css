@@ -411,8 +411,7 @@ button.nn-topic-graph-value-text:not(:disabled):hover {
     text-decoration: underline;
 }
 
-.nn-topic-graph-value-remove,
-.nn-topic-graph-value-add {
+.nn-topic-graph-value-remove {
     flex: none;
     min-height: 22px;
     color: var(--text-muted);
@@ -423,26 +422,23 @@ button.nn-topic-graph-value-text:not(:disabled):hover {
     height: var(--icon-xs, 12px);
 }
 
-.nn-topic-graph-value-add {
-    gap: var(--size-4-1);
-    margin-block-start: var(--size-4-1);
-    padding-inline: 0 var(--size-4-2);
-    font-size: var(--metadata-sidebar-label-font-size, var(--font-ui-small));
-}
-
-.nn-topic-graph-value-input {
-    display: inline-flex;
-    align-items: center;
-    flex: 1 1 9em;
+.nn-topic-graph-property-values input.nn-topic-graph-value-input {
+    flex: 1 1 5em;
+    min-width: 5em;
     max-width: 100%;
-    min-width: 0;
+    min-block-size: var(--metadata-input-height, 28px);
+    height: auto;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: inherit;
+    font: inherit;
 }
 
-.nn-topic-graph-value-input input {
-    flex: 1;
-    min-width: 0;
-    height: var(--metadata-input-height, 28px);
-    font-size: inherit;
+.nn-topic-graph-value-input::placeholder {
+    color: var(--text-faint);
 }
 
 .nn-topic-graph-editor-actions {

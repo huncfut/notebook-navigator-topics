@@ -877,8 +877,10 @@ describe('Obsidian integration', () => {
         expect(populated).toContain('title="[[Missing]]"');
         expect(populated).toContain('Remove value 3: false');
         expect(populated).not.toContain('type="submit"');
+        expect(populated.match(/<input\b/g)).toHaveLength(1);
+        expect(populated.indexOf('<input')).toBeGreaterThan(populated.indexOf('Remove value 3'));
         expect(render('[[Audio]]')).toContain('data-layout="scalar"');
-        expect(render(undefined)).toContain('Add value');
+        expect(render(undefined)).toContain('placeholder="Add value"');
     });
 
     it('stages inline values without changing the previous draft and gives the popover first use of keys', () => {
@@ -901,8 +903,19 @@ describe('Obsidian integration', () => {
         const file = createTestTFile('Notes/Parent.md');
         const generateMarkdownLink = vi.fn(() => '[Parent](../Notes/Parent.md)');
         const picked = vi.fn();
-        const app = { vault: { getMarkdownFiles: () => [file] }, fileManager: { generateMarkdownLink } } as unknown as App;
-        const suggest = attachRelationshipSuggestions(app, {} as HTMLInputElement, 'Topics/Child.md', picked);
+        const getMarkdownFiles = vi.fn(() => [file]);
+        const app = { vault: { getMarkdownFiles }, fileManager: { generateMarkdownLink } } as unknown as App;
+        const input = new EventTarget() as unknown as HTMLInputElement;
+        const suggest = attachRelationshipSuggestions(app, input, 'Topics/Child.md', picked);
+        expect(suggest.getSuggestions('')).toEqual([]);
+        expect(suggest.getSuggestions('Parent')).toEqual([]);
+        expect(suggest.getSuggestions('[[')).toEqual([]);
+        expect(getMarkdownFiles).not.toHaveBeenCalled();
+        input.dispatchEvent(new Event('input'));
+        expect(suggest.getSuggestions(' ')).toEqual([]);
+        expect(suggest.getSuggestions('[')).toEqual([]);
+        expect(suggest.getSuggestions('[[Parent|Alias')).toEqual([]);
+        expect(getMarkdownFiles).not.toHaveBeenCalled();
         const options = suggest.getSuggestions('[[');
         expect(options[0].item).toBe(file);
         const event = { preventDefault: vi.fn() } as unknown as KeyboardEvent;
@@ -913,6 +926,13 @@ describe('Obsidian integration', () => {
         expect(suggest.showing).toBe(false);
         expect(generateMarkdownLink).toHaveBeenCalledWith(file, 'Topics/Child.md');
         expect(picked).toHaveBeenCalledWith('[Parent](../Notes/Parent.md)');
+        suggest.reset();
+        expect(suggest.getSuggestions('[[')).toEqual([]);
+        input.dispatchEvent(new Event('input'));
+        expect(suggest.getSuggestions('[[')).toHaveLength(1);
+        suggest.dispose();
+        input.dispatchEvent(new Event('input'));
+        expect(suggest.getSuggestions('[[')).toEqual([]);
     });
 
     it('adds, replaces, and clears a property while preserving unrelated frontmatter and existing scalar shape', async () => {

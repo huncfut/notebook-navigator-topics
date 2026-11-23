@@ -52,6 +52,11 @@ export function relationshipEditKey(key: string, suggestionsOpen: boolean): 'app
 }
 
 export function attachRelationshipSuggestions(app: App, input: HTMLInputElement, notePath: string, onPick: (link: string) => void) {
+    let typed = false;
+    const markTyped = () => {
+        typed = true;
+    };
+
     class RelationshipSuggest extends AbstractInputSuggest<PathSuggestionItem<TFile>> {
         showing = false;
 
@@ -65,13 +70,22 @@ export function attachRelationshipSuggestions(app: App, input: HTMLInputElement,
             this.showing = false;
         }
 
+        reset(): void {
+            typed = false;
+            this.close();
+        }
+
+        dispose(): void {
+            input.removeEventListener('input', markTyped, { capture: true });
+            this.reset();
+        }
+
         getSuggestions(query: string): PathSuggestionItem<TFile>[] {
+            const value = query.trim();
+            if (!typed || !value || value === '[' || /[|#\]]/.test(value)) return [];
             return buildPathSuggestionItems({
                 items: app.vault.getMarkdownFiles(),
-                query: query
-                    .trim()
-                    .replace(/^\[\[/, '')
-                    .split(/[|#\]]/, 1)[0],
+                query: value.replace(/^\[\[/, '').trim(),
                 limit: this.limit,
                 getPath: file => file.path
             });
@@ -88,94 +102,42 @@ export function attachRelationshipSuggestions(app: App, input: HTMLInputElement,
         }
     }
 
+    // Record real input before Obsidian handles it. Focus and programmatic prefills stay quiet.
+    input.addEventListener('input', markTyped, { capture: true });
     const suggest = new RelationshipSuggest(app, input);
     suggest.limit = 10;
     return suggest;
-}
-
-function RelationshipInput({
-    app,
-    notePath,
-    value,
-    label,
-    onChange,
-    onApply,
-    onCancel
-}: {
-    app: App;
-    notePath: string;
-    value: string;
-    label: string;
-    onChange: (value: string) => void;
-    onApply: (value: string) => void;
-    onCancel: () => void;
-}) {
-    const input = useRef<HTMLInputElement>(null);
-    const suggest = useRef<ReturnType<typeof attachRelationshipSuggestions> | null>(null);
-    const apply = useRef(onApply);
-
-    useLayoutEffect(() => {
-        apply.current = onApply;
-    }, [onApply]);
-
-    useLayoutEffect(() => {
-        const element = input.current;
-        if (!element) return;
-        const popup = attachRelationshipSuggestions(app, element, notePath, link => apply.current(link));
-        suggest.current = popup;
-        element.focus({ preventScroll: true });
-        element.select();
-        return () => {
-            popup.close();
-            suggest.current = null;
-        };
-    }, [app, notePath]);
-
-    function handleKey(event: KeyboardEvent<HTMLInputElement>) {
-        if (event.nativeEvent.isComposing || event.defaultPrevented) return;
-        const action = relationshipEditKey(event.key, suggest.current?.showing ?? false);
-        if (!action) return;
-        event.preventDefault();
-        if (action === 'apply') onApply(value);
-        else onCancel();
-    }
-
-    return (
-        <span className="nn-topic-graph-value-input">
-            <input
-                ref={input}
-                aria-label={label}
-                placeholder="Search notes or enter a link"
-                value={value}
-                onChange={event => onChange(event.target.value)}
-                onKeyDown={handleKey}
-            />
-            <button type="button" className="clickable-icon" aria-label="Apply value" title="Apply value" onClick={() => onApply(value)}>
-                <ObsidianIcon name="check" aria-hidden />
-            </button>
-        </span>
-    );
 }
 
 export function TopicRelationshipEditor({ app, notePath, title, relationship, busy, onSave, onCancel }: RelationshipEditorProps) {
     const [draft, setDraft] = useState<Draft | null>(null);
     const [editing, setEditing] = useState<InlineEdit | null>(null);
     const nextId = useRef(0);
-    const form = useRef<HTMLFormElement>(null);
-    const restoreFocus = useRef<number | 'add' | null>(null);
+    const input = useRef<HTMLInputElement>(null);
+    const suggest = useRef<ReturnType<typeof attachRelationshipSuggestions> | null>(null);
+    const apply = useRef<(value: string) => void>(() => {});
+    const selectOnEdit = useRef(false);
     const propertyId = useId();
     const entries = draft?.entries ?? propertyValues(relationship.value).map((value, index) => ({ id: index, value }));
     const isList = Array.isArray(relationship.value) || entries.length > 1 || relationship.key === undefined;
 
     useLayoutEffect(() => {
-        const id = restoreFocus.current;
-        if (editing || id === null) return;
-        restoreFocus.current = null;
-        const button =
-            form.current?.querySelector<HTMLButtonElement>(`[data-edit-value="${id}"]`) ??
-            form.current?.querySelector<HTMLButtonElement>('[data-add-value]');
-        button?.focus({ preventScroll: true });
-    }, [draft, editing]);
+        if (!selectOnEdit.current) return;
+        selectOnEdit.current = false;
+        input.current?.focus({ preventScroll: true });
+        input.current?.select();
+    }, [editing]);
+
+    useLayoutEffect(() => {
+        const element = input.current;
+        if (!element) return;
+        const popup = attachRelationshipSuggestions(app, element, notePath, link => apply.current(link));
+        suggest.current = popup;
+        return () => {
+            popup.dispose();
+            suggest.current = null;
+        };
+    }, [app, notePath]);
 
     function expected() {
         return draft?.expected ?? editing?.expected ?? structuredClone(relationship);
@@ -186,46 +148,46 @@ export function TopicRelationshipEditor({ app, notePath, title, relationship, bu
             const staged = stageRelationshipEntry(entries, editing.id, editing.value);
             if (staged !== entries) setDraft({ expected: expected(), entries: staged });
         }
+        suggest.current?.reset();
+        selectOnEdit.current = true;
         setEditing({ id, value, expected: expected() });
     }
 
     function endEditing() {
-        restoreFocus.current = editing?.id ?? 'add';
+        suggest.current?.reset();
         setEditing(null);
     }
 
     function applyValue(value: string) {
-        if (!editing) return;
+        if (busy || !editing) return;
         const staged = stageRelationshipEntry(entries, editing.id, value);
         if (staged !== entries) setDraft({ expected: expected(), entries: staged });
         endEditing();
+        input.current?.focus({ preventScroll: true });
     }
+
+    useLayoutEffect(() => {
+        apply.current = applyValue;
+    });
 
     function remove(id: number) {
         const staged = editing && editing.id !== id ? stageRelationshipEntry(entries, editing.id, editing.value) : entries;
-        const retained = staged.filter(entry => entry.id !== id);
-        const index = staged.findIndex(entry => entry.id === id);
-        restoreFocus.current = (retained[index] ?? retained[index - 1])?.id ?? 'add';
-        setDraft({ expected: expected(), entries: retained });
-        setEditing(null);
+        setDraft({ expected: expected(), entries: staged.filter(entry => entry.id !== id) });
+        endEditing();
+        input.current?.focus({ preventScroll: true });
     }
 
-    const activeInput = editing && (
-        <RelationshipInput
-            key={editing.id}
-            app={app}
-            notePath={notePath}
-            value={editing.value}
-            label={`Edit ${relationship.property} value`}
-            onChange={value => setEditing({ ...editing, value })}
-            onApply={applyValue}
-            onCancel={endEditing}
-        />
-    );
+    function handleKey(event: KeyboardEvent<HTMLInputElement>) {
+        if (event.nativeEvent.isComposing || event.defaultPrevented) return;
+        const action = relationshipEditKey(event.key, suggest.current?.showing ?? false);
+        if (!action) return;
+        event.preventDefault();
+        if (action === 'apply') applyValue(event.currentTarget.value);
+        else endEditing();
+    }
 
     return (
         <form
-            ref={form}
             className="nn-topic-graph-editor"
             onSubmit={event => {
                 event.preventDefault();
@@ -250,7 +212,7 @@ export function TopicRelationshipEditor({ app, notePath, title, relationship, bu
                     </div>
                     <div className="nn-topic-graph-property-values" data-layout={isList ? 'list' : 'scalar'}>
                         {entries.map((entry, index) => {
-                            if (entry.id === editing?.id) return activeInput;
+                            if (entry.id === editing?.id) return null;
                             const label = valueLabel(entry.value);
                             const raw = typeof entry.value === 'string' ? entry.value : label;
                             return (
@@ -283,20 +245,20 @@ export function TopicRelationshipEditor({ app, notePath, title, relationship, bu
                                 </span>
                             );
                         })}
-                        {editing && !entries.some(entry => entry.id === editing.id) && activeInput}
+                        <input
+                            ref={input}
+                            className="nn-topic-graph-value-input"
+                            aria-label={`Edit ${relationship.property} values`}
+                            placeholder="Add value"
+                            value={editing?.value ?? ''}
+                            onChange={event => {
+                                const value = event.target.value;
+                                setEditing(editing ? { ...editing, value } : { id: --nextId.current, value, expected: expected() });
+                            }}
+                            onKeyDown={handleKey}
+                        />
                     </div>
                 </div>
-                {!editing && (
-                    <button
-                        type="button"
-                        className="clickable-icon nn-topic-graph-value-add"
-                        data-add-value
-                        onClick={() => start(--nextId.current, '')}
-                    >
-                        <ObsidianIcon name="plus" aria-hidden />
-                        <span>Add value</span>
-                    </button>
-                )}
                 {(draft || editing) && (
                     <div className="nn-topic-graph-editor-actions">
                         <button type="submit" className="mod-cta">
