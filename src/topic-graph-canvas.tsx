@@ -3,13 +3,11 @@ import { ObsidianIcon } from '../components/ObsidianIcon';
 import {
     getGraphBounds,
     topicCard,
-    type buildTopicGraphDisplay,
+    type TopicGraphDisplay,
     type GraphBounds,
-    type GraphDepth,
+    type TopicGraphViewMode,
     type GraphEdge
 } from './topic-graph-data';
-
-type Display = ReturnType<typeof buildTopicGraphDisplay>;
 
 const panDirections = new Map<string, [number, number]>([
     ['ArrowUp', [0, 36]],
@@ -25,10 +23,11 @@ interface Camera {
 }
 
 interface GraphCanvasProps {
-    display: Display;
-    depth: GraphDepth;
+    display: TopicGraphDisplay;
+    view: TopicGraphViewMode;
     busy: boolean;
     title: (path: string) => string;
+    onFocus: (path: string) => void;
     onOpen: (path: string) => void;
     onConnect: (child: string, parent: string) => void;
     onRemove: (edge: GraphEdge) => Promise<boolean>;
@@ -55,31 +54,30 @@ interface PointerStart {
 
 export function graphNodeGesture(child: string, target: string | undefined, moved: boolean, shift: boolean) {
     if (moved) return target && target !== child ? { action: 'connect' as const, child, parent: target } : undefined;
-    return shift && target === child ? { action: 'open' as const, child } : undefined;
+    return target === child ? { action: shift ? ('open' as const) : ('focus' as const), child } : undefined;
 }
 
-export function TopicGraphCanvas({ display, depth, busy, title, onOpen, onConnect, onRemove }: GraphCanvasProps) {
+export function TopicGraphCanvas({ display, view, busy, title, onFocus, onOpen, onConnect, onRemove }: GraphCanvasProps) {
     const svg = useRef<SVGSVGElement>(null);
     const drag = useRef<PointerStart | null>(null);
     const [connection, setConnection] = useState<{ child: string; target: string | undefined } | null>(null);
     const id = useId();
     const [viewport, setViewport] = useState({ width: 800, height: 600 });
-    const [position, setPosition] = useState<Camera | null>(null);
+    const [position, setPosition] = useState<{ view: TopicGraphViewMode; camera: Camera } | null>(null);
     const [selected, setSelected] = useState<string | null>(null);
-    const vertices = display.vertices.filter(vertex => vertex.depth <= depth);
-    const edges = display.edges.filter(edge => edge.depth <= depth);
-    const cycles = display.vertices.filter(vertex => vertex.depth === 0);
+    const { vertices, edges, center } = display;
     const bounds = getGraphBounds(vertices, edges);
-    // Depth changes reveal more of the layout around the same initial cycle focus.
-    const focusBounds = cycles.length
-        ? getGraphBounds(
-              cycles,
-              display.edges.filter(edge => edge.cyclic)
-          )
+    const focusBounds = center
+        ? {
+              ...center,
+              width: bounds.width + 2 * Math.abs(bounds.x - center.x),
+              height: bounds.height + 2 * Math.abs(bounds.y - center.y)
+          }
         : bounds;
     const fitted = fit(viewport, focusBounds);
-    const camera = position ?? fitted;
-    const minScale = Math.min(0.08, fit(viewport, bounds).scale);
+    const camera = position?.view === view ? position.camera : fitted;
+    const currentCamera = (current: typeof position) => (current?.view === view ? current.camera : fitted);
+    const minScale = Math.min(0.08, fitted.scale);
 
     useEffect(() => {
         const element = svg.current;
@@ -103,20 +101,20 @@ export function TopicGraphCanvas({ display, depth, busy, title, onOpen, onConnec
             const x = event.clientX - rect.left - rect.width / 2;
             const y = event.clientY - rect.top - rect.height / 2;
             const factor = Math.exp(-Math.sign(event.deltaY) * Math.min(Math.abs(event.deltaY) * 0.004, 0.3));
-            setPosition(current => zoomCamera(current ?? fitted, factor, minScale, x, y));
+            setPosition(current => ({ view, camera: zoomCamera(currentCamera(current), factor, minScale, x, y) }));
         };
         element.addEventListener('wheel', wheel, { passive: false });
         return () => element.removeEventListener('wheel', wheel);
-    }, [fitted.x, fitted.y, fitted.scale, minScale]);
+    }, [view, fitted.x, fitted.y, fitted.scale, minScale]);
 
     function zoom(factor: number) {
-        setPosition(current => zoomCamera(current ?? fitted, factor, minScale));
+        setPosition(current => ({ view, camera: zoomCamera(currentCamera(current), factor, minScale) }));
     }
 
     function pan(x: number, y: number) {
         setPosition(current => {
-            const previous = current ?? fitted;
-            return { ...previous, x: previous.x + x, y: previous.y + y };
+            const previous = currentCamera(current);
+            return { view, camera: { ...previous, x: previous.x + x, y: previous.y + y } };
         });
     }
 
@@ -181,6 +179,7 @@ export function TopicGraphCanvas({ display, depth, busy, title, onOpen, onConnec
         const gesture = graphNodeGesture(pointer.node, target, pointerMoved(pointer, event), event.shiftKey);
         if (gesture?.action === 'connect' && !busy) onConnect(gesture.child, gesture.parent);
         if (gesture?.action === 'open') onOpen(gesture.child);
+        if (gesture?.action === 'focus') onFocus(gesture.child);
     }
 
     function onKeyDown(event: KeyboardEvent<SVGSVGElement>) {
@@ -275,7 +274,7 @@ export function TopicGraphCanvas({ display, depth, busy, title, onOpen, onConnec
                     {vertices.map(vertex => {
                         const label = title(vertex.path);
                         const className = ['nn-topic-graph-node'];
-                        if (vertex.depth === 0) className.push('is-cyclic');
+                        if (vertex.cyclic) className.push('is-cyclic');
                         if (vertex.path === connection?.child) className.push('is-drag-source');
                         if (vertex.path === connection?.target) className.push('is-drop-target');
                         return (
@@ -286,11 +285,12 @@ export function TopicGraphCanvas({ display, depth, busy, title, onOpen, onConnec
                                 transform={`translate(${vertex.position.x} ${vertex.position.y})`}
                                 role="button"
                                 tabIndex={0}
-                                aria-label={`Open ${vertex.path}`}
+                                aria-label={`Focus ${vertex.path}`}
+                                aria-keyshortcuts="Enter Shift+Enter"
                                 onClick={event => {
-                                    if (event.detail === 0) onOpen(vertex.path);
+                                    if (event.detail === 0) (event.shiftKey ? onOpen : onFocus)(vertex.path);
                                 }}
-                                onKeyDown={event => activate(event, () => onOpen(vertex.path))}
+                                onKeyDown={event => activate(event, () => (event.shiftKey ? onOpen : onFocus)(vertex.path))}
                             >
                                 <title>{vertex.path}</title>
                                 <rect
@@ -328,7 +328,7 @@ export function TopicGraphCanvas({ display, depth, busy, title, onOpen, onConnec
                         className="clickable-icon"
                         aria-label="Fit graph"
                         title="Fit graph"
-                        onClick={() => setPosition(fit(viewport, bounds))}
+                        onClick={() => setPosition({ view, camera: fitted })}
                     >
                         <ObsidianIcon name="maximize" aria-hidden />
                     </button>

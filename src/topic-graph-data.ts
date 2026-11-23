@@ -1,7 +1,8 @@
 import type { TopicGraph, TopicLink } from './graph';
 
-export const graphDepths = ['0', '1', '2', 'Full'] as const;
-export type GraphDepth = 0 | 1 | 2 | 3;
+export type TopicGraphViewMode = { kind: 'full' } | { kind: 'node'; path: string } | { kind: 'cycle' };
+
+export const fullTopicGraphView: TopicGraphViewMode = { kind: 'full' };
 
 interface Point {
     x: number;
@@ -16,7 +17,6 @@ export interface GraphBounds {
 export interface GraphEdge extends TopicLink {
     id: string;
     cyclic: boolean;
-    depth: GraphDepth;
     path: string;
     action: Point;
     route: readonly Point[];
@@ -24,8 +24,14 @@ export interface GraphEdge extends TopicLink {
 
 interface GraphVertex {
     path: string;
+    cyclic: boolean;
     position: Point;
-    depth: GraphDepth;
+}
+
+export interface TopicGraphDisplay {
+    vertices: GraphVertex[];
+    edges: GraphEdge[];
+    center?: Point;
 }
 
 interface Block {
@@ -404,51 +410,45 @@ function cubicEdge(route: readonly Point[]): Pick<GraphEdge, 'path' | 'action' |
     };
 }
 
-export function buildTopicGraphDisplay(graph: TopicGraph, reduceCrossings = true): { vertices: GraphVertex[]; edges: GraphEdge[] } {
+export function buildTopicGraphDisplay(graph: TopicGraph, reduceCrossings = true): TopicGraphDisplay {
     const cycleEdges = graph.cycles.flat();
     const cycleLinks = new Set(cycleEdges.map(edgeId));
-    const depths = new Map<string, GraphDepth>(cycleEdges.map(({ child }) => [child, 0]));
+    const cyclicNodes = new Set(cycleEdges.map(edge => edge.child));
     const links: TopicLink[] = [];
-    const incoming = new Map<string, string[]>();
     // parents holds the stored links, including the edges suppressed in the navigation tree.
     for (const child of [...graph.parents.keys()].sort()) {
         for (const parent of [...graph.parents.get(child)!].sort()) {
             links.push({ child, parent });
-            const children = incoming.get(parent) ?? [];
-            children.push(child);
-            incoming.set(parent, children);
         }
-    }
-
-    let frontier = [...depths.keys()];
-    for (const depth of [1, 2] as const) {
-        const neighbors: string[] = [];
-        for (const path of frontier) {
-            for (const neighbor of [...(graph.parents.get(path) ?? []), ...(incoming.get(path) ?? [])]) {
-                if (depths.has(neighbor)) continue;
-                depths.set(neighbor, depth);
-                neighbors.push(neighbor);
-            }
-        }
-        frontier = neighbors;
     }
 
     const { positions, detours } = routePositions(layoutBlocks(graph, links, reduceCrossings), links);
-    const vertices = [...positions].map(([path, position]): GraphVertex => ({ path, position, depth: depths.get(path) ?? 3 }));
+    const vertices = [...positions].map(([path, position]) => ({ path, position, cyclic: cyclicNodes.has(path) }));
     const edges = links.map((link): GraphEdge => {
         const id = edgeId(link);
-        const cyclic = cycleLinks.has(id);
-        const nearest = Math.min(depths.get(link.child) ?? 3, depths.get(link.parent) ?? 3);
-        const depth = cyclic ? 0 : nearest === 0 ? 1 : nearest === 1 ? 2 : 3;
         return {
             ...link,
             id,
-            cyclic,
-            depth,
+            cyclic: cycleLinks.has(id),
             ...edgeGeometry(positions.get(link.parent)!, positions.get(link.child)!, detours.get(id))
         };
     });
     return { vertices, edges };
+}
+
+export function getTopicGraphView(display: TopicGraphDisplay, view: TopicGraphViewMode): TopicGraphDisplay {
+    if (view.kind === 'full') return display;
+    const center = view.kind === 'node' ? display.vertices.find(vertex => vertex.path === view.path)?.position : undefined;
+    if (view.kind === 'node' && !center) return display;
+    const edges = display.edges.filter(edge =>
+        view.kind === 'cycle' ? edge.cyclic : edge.child === view.path || edge.parent === view.path
+    );
+    const visible = new Set(view.kind === 'node' ? [view.path] : []);
+    for (const { child, parent } of edges) {
+        visible.add(child);
+        visible.add(parent);
+    }
+    return { vertices: display.vertices.filter(vertex => visible.has(vertex.path)), edges, center };
 }
 
 export function getGraphBounds(vertices: readonly GraphVertex[], edges: readonly GraphEdge[]): GraphBounds & Point {
