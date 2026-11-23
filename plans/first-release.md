@@ -1,6 +1,6 @@
 # Notebook Navigator Topics first-release plan
 
-Approved scope for Notebook Navigator `3.5.1`. See [OBJECTIVE.md](OBJECTIVE.md) for the extension’s long-term objective.
+Approved scope for Notebook Navigator `3.5.1`, tracked in [issue #1](https://github.com/huncfut/notebook-navigator-topics/issues/1). See the [project objective](../OBJECTIVE.md) for the extension’s long-term goal.
 
 ## 1. Configure topic sections
 

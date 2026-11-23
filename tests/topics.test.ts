@@ -34,8 +34,21 @@ import { buildSearchableNameData, filterListPaneFiles } from '../src/hooks/listP
 import { DEFAULT_SETTINGS } from '../src/settings/defaultSettings';
 import type { IndexedDBStorage } from '../src/storage/IndexedDBStorage';
 import { createTestTFile } from './utils/createTestTFile';
-import { CycleRepair, TopicsSettings } from '../src/topics/modals';
+import { TopicsSettings } from '../src/topics/modals';
+import { graphNodeGesture, TopicGraphCanvas } from '../src/topics/topic-graph-canvas';
+import { buildTopicGraphDisplay, getGraphBounds, topicCard, type GraphDepth } from '../src/topics/topic-graph-data';
+import { TopicGraphPanel } from '../src/topics/topic-graph-panel';
+import { attachRelationshipSuggestions, relationshipEditKey, stageRelationshipEntry, TopicRelationshipEditor } from '../src/topics/topic-relationship-editor';
+import { revealTopicGraph, TOPIC_GRAPH_VIEW } from '../src/topics/topic-graph-workspace';
 import { registerTopicsStyles } from '../src/topics/styles';
+
+vi.mock('obsidian', async importOriginal => ({
+    ...(await importOriginal<typeof import('obsidian')>()),
+    AbstractInputSuggest: class {
+        open() {}
+        close() {}
+    }
+}));
 
 const section: TopicSection = {
     id: 'concepts',
@@ -178,6 +191,174 @@ describe('graph traversal and cycle safety', () => {
         expect(graph.parents.get('A.md')).toEqual(['B.md', 'Outside.md']);
         expect(wouldIntroduceCycle(graph, 'A.md', 'B.md')).toBe(false);
         expect(wouldIntroduceCycle(graph, 'C.md', 'Descendant.md')).toBe(true);
+    });
+
+    it('expands from all cycles by incident links and excludes leaves at every depth', () => {
+        const graph = graphFor([
+            note('A', 'koncept', 'B', 'Parent'),
+            note('B', 'koncept', 'A'),
+            note('Self', 'koncept', 'Self'),
+            note('Child', 'koncept', 'A'),
+            note('Parent', 'koncept', 'Grandparent'),
+            note('Grandchild', 'koncept', 'Child'),
+            note('Grandparent', 'koncept', 'Third hop'),
+            note('Third hop', 'koncept'),
+            note('Isolated', 'koncept'),
+            note('Unrelated child', 'koncept', 'Unrelated parent'),
+            note('Unrelated parent', 'koncept'),
+            note('Leaf', 'notatka', 'A')
+        ]);
+        const { vertices, edges } = buildTopicGraphDisplay(graph);
+        const namesAt = (depth: number) =>
+            vertices
+                .filter(vertex => vertex.depth === depth)
+                .map(vertex => vertex.path)
+                .sort();
+        const linksAt = (depth: number) => edges.filter(edge => edge.depth === depth).map(edge => [edge.child, edge.parent]);
+
+        expect(namesAt(0)).toEqual(['A.md', 'B.md', 'Self.md']);
+        expect(namesAt(1)).toEqual(['Child.md', 'Parent.md']);
+        expect(namesAt(2)).toEqual(['Grandchild.md', 'Grandparent.md']);
+        expect(namesAt(3)).toEqual(['Isolated.md', 'Third hop.md', 'Unrelated child.md', 'Unrelated parent.md']);
+        expect(linksAt(0)).toEqual([
+            ['A.md', 'B.md'],
+            ['B.md', 'A.md'],
+            ['Self.md', 'Self.md']
+        ]);
+        expect(linksAt(1)).toEqual([
+            ['A.md', 'Parent.md'],
+            ['Child.md', 'A.md']
+        ]);
+        expect(linksAt(2)).toEqual([
+            ['Grandchild.md', 'Child.md'],
+            ['Parent.md', 'Grandparent.md']
+        ]);
+        expect(linksAt(3)).toEqual([
+            ['Grandparent.md', 'Third hop.md'],
+            ['Unrelated child.md', 'Unrelated parent.md']
+        ]);
+        expect(edges.filter(edge => edge.cyclic)).toHaveLength(3);
+        const [forward, reverse, loop] = edges.filter(edge => edge.cyclic);
+        expect(forward.action).not.toEqual(reverse.action);
+        expect(loop.path).toContain(' C ');
+        expect(edges.every(edge => !edge.path.includes('NaN'))).toBe(true);
+    });
+
+    it('keeps a directed link between separate cycles outside depth zero', () => {
+        const { edges } = buildTopicGraphDisplay(graphFor([note('A', 'koncept', 'A', 'B'), note('B', 'koncept', 'B')]));
+        expect(edges.find(edge => edge.child !== edge.parent)).toMatchObject({ cyclic: false, depth: 1 });
+    });
+
+    it('draws arrows from parents on the left to children on the right without overlapping cards', () => {
+        const notes = [
+            note('A', 'koncept', 'A', 'B', 'Parent'),
+            note('B', 'koncept', 'A', 'C'),
+            note('C', 'koncept', 'C', 'Parent'),
+            note('Child', 'koncept', 'A', 'Parent'),
+            note('Sibling', 'koncept', 'Parent'),
+            note('Parent', 'koncept'),
+            note('Disconnected', 'koncept', 'Other'),
+            note('Other', 'koncept')
+        ];
+        const display = buildTopicGraphDisplay(graphFor(notes));
+        expect(buildTopicGraphDisplay(graphFor([...notes].reverse()))).toEqual(display);
+
+        const positions = new Map(display.vertices.map(vertex => [vertex.path, vertex.position]));
+        for (const edge of display.edges.filter(edge => !edge.cyclic)) {
+            const parent = positions.get(edge.parent)!;
+            const child = positions.get(edge.child)!;
+            expect(parent.x).toBeLessThan(child.x);
+            expect(edge.route[0].x).toBe(parent.x + topicCard.width / 2);
+            expect(edge.route.at(-1)!.x).toBe(child.x - topicCard.width / 2 - 4);
+        }
+        expect(positions.get('Disconnected.md')!.y).toBeGreaterThan(positions.get('Parent.md')!.y);
+
+        for (const [index, vertex] of display.vertices.entries()) {
+            for (const other of display.vertices.slice(index + 1)) {
+                expect(
+                    Math.abs(vertex.position.x - other.position.x) >= topicCard.width ||
+                        Math.abs(vertex.position.y - other.position.y) >= topicCard.height
+                ).toBe(true);
+            }
+        }
+        const shortcut = display.edges.find(edge => edge.child === 'A.md' && edge.parent === 'Parent.md')!;
+        const [, , start, end] = shortcut.route;
+        const intermediate = positions.get('B.md')!;
+        expect(start.y).toBe(end.y);
+        expect(start.y).toBeLessThan(intermediate.y - topicCard.height / 2);
+        expect(start.x).toBeLessThan(intermediate.x - topicCard.width / 2);
+        expect(end.x).toBeGreaterThan(intermediate.x + topicCard.width / 2);
+
+        const cycleEdges = display.edges.filter(edge => edge.cyclic);
+        expect(new Set(cycleEdges.map(edge => JSON.stringify(edge.action))).size).toBe(cycleEdges.length);
+        const bounds = getGraphBounds(display.vertices, display.edges);
+        for (const { x, y } of display.edges.flatMap(edge => edge.route)) {
+            expect(Math.abs(x - bounds.x)).toBeLessThan(bounds.width / 2);
+            expect(Math.abs(y - bounds.y)).toBeLessThan(bounds.height / 2);
+        }
+    });
+
+    it('reveals more cards without moving the focused cycle on depth changes', () => {
+        const display = buildTopicGraphDisplay(
+            graphFor([note('A', 'koncept', 'B'), note('B', 'koncept', 'A', 'Parent'), note('Parent', 'koncept'), note('Other', 'koncept')])
+        );
+        const render = (depth: GraphDepth) =>
+            renderToStaticMarkup(
+                createElement(TopicGraphCanvas, {
+                    display,
+                    depth,
+                    busy: false,
+                    title: path => path,
+                    selectedNode: null,
+                    onSelect: vi.fn(),
+                    onOpen: vi.fn(),
+                    onConnect: vi.fn(),
+                    onRemove: vi.fn(async () => true)
+                })
+            );
+        const initial = render(0);
+        const focus = initial.match(/<g transform="[^"]+scale\([^"]+"/g)?.[0];
+        expect(focus).toBeDefined();
+        expect(initial).toContain(`rx="${topicCard.radius}"`);
+        expect(initial).not.toContain('Select Parent.md');
+        expect(render(1)).toContain('Select Parent.md');
+        for (const depth of [1, 2, 3] as const) expect(render(depth)).toContain(focus!);
+        expect(render(3)).toContain('Select Other.md');
+    });
+
+    it('reduces avoidable crossings without changing the columns of any note', () => {
+        const graph = graphFor([
+            note('A', 'koncept', 'Y'),
+            note('B', 'koncept', 'X'),
+            note('C', 'koncept', 'X', 'Y'),
+            note('X', 'koncept', 'Top'),
+            note('Y', 'koncept', 'Top'),
+            note('Top', 'koncept')
+        ]);
+        const original = buildTopicGraphDisplay(graph, false);
+        const optimized = buildTopicGraphDisplay(graph);
+        function crossings({ edges }: typeof original): number {
+            return edges.reduce((count, edge, index) => {
+                const [first, last] = [edge.route[0], edge.route.at(-1)!];
+                for (const other of edges.slice(index + 1)) {
+                    const [left, right] = [other.route[0], other.route.at(-1)!];
+                    if (first.x === left.x && last.x === right.x && (first.y - left.y) * (last.y - right.y) < 0) count++;
+                }
+                return count;
+            }, 0);
+        }
+        expect(original.vertices.map(vertex => vertex.position.x)).toEqual(optimized.vertices.map(vertex => vertex.position.x));
+        expect(crossings(original)).toBeGreaterThan(0);
+        expect(crossings(optimized)).toBe(0);
+    });
+
+    it('selects on click, opens on Shift-click, and connects the dragged child to its drop target', () => {
+        expect(graphNodeGesture('A', 'A', false, false)).toEqual({ action: 'select', child: 'A' });
+        expect(graphNodeGesture('A', 'A', false, true)).toEqual({ action: 'open', child: 'A' });
+        expect(graphNodeGesture('A', 'B', true, false)).toEqual({ action: 'connect', child: 'A', parent: 'B' });
+        expect(graphNodeGesture('A', 'A', true, false)).toBeUndefined();
+        expect(graphNodeGesture('A', undefined, true, false)).toBeUndefined();
+        expect(graphNodeGesture('A', 'B', false, false)).toBeUndefined();
     });
 
     it('predicts added cycles without treating a shared descendant as a cycle', () => {
@@ -637,6 +818,9 @@ describe('Obsidian integration', () => {
             await vault.controller.editParent(section.id, 'Music.md', 'Audio.md', 'remove');
             expect(vault.frontmatter.get('Music.md')).toEqual({ Typ: 'koncept' });
             expect(vault.controller.getSnapshot().graphs.get(section.id)?.cycles).toEqual([]);
+            const repaired = renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id }));
+            expect(repaired).toContain('No cycles detected.');
+            expect(repaired).not.toContain('Remove link');
         } finally {
             vault.cleanup();
             vi.useRealTimers();
@@ -653,16 +837,153 @@ describe('Obsidian integration', () => {
             expect(settings).toContain('New tab');
             expect(settings).toContain('Powiązane');
             expect(settings).toContain('Pracuje w');
-            expect(settings).toContain('Topic links form a cycle. Open repair tool');
-            expect(settings).toContain('Manage parent links');
-            const repair = renderToStaticMarkup(createElement(CycleRepair, { controller: vault.controller, sectionId: section.id }));
-            expect(repair).toContain('title="Loop.md"');
-            expect(repair).toContain('Remove link');
-            expect(repair).toContain('Add link');
+            expect(settings).toContain('Topic links form a cycle. Open Topic Graph');
+            expect(settings).toContain('Open Topic Graph');
+            const repair = renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id }));
+            expect(repair).toContain('<title>Loop.md</title>');
+            expect(repair).toContain('Remove link Loop → Loop');
+            expect(repair).toContain('aria-valuetext="0"');
+            expect(repair).toContain('is-cyclic');
+            expect(repair).toContain('marker-end=');
+            expect(repair).not.toContain('Select Music.md');
+            expect(repair).toContain('Select a note to edit its links');
             expect(repair).not.toContain('Venue.md');
-            const healthy = renderToStaticMarkup(createElement(CycleRepair, { controller: vault.controller, sectionId: organizations.id }));
+            const healthy = renderToStaticMarkup(
+                createElement(TopicGraphPanel, { controller: vault.controller, sectionId: organizations.id })
+            );
             expect(healthy).toContain('No cycles detected.');
-            expect(healthy).toContain('Venue.md');
+            expect(healthy).toContain('Show full section');
+        } finally {
+            vault.cleanup();
+        }
+    });
+
+    it('renders a compact property row for a scalar, a list, and an empty property', () => {
+        const render = (value: unknown) => renderToStaticMarkup(createElement(TopicRelationshipEditor, {
+            app: {} as App,
+            notePath: 'Music.md',
+            title: 'Music',
+            relationship: { property: 'Powiązane', key: 'powiązane', value },
+            busy: false,
+            onSave: vi.fn(),
+            onCancel: vi.fn()
+        }));
+        const populated = render(['[[Audio|Sound]]', '[[Missing]]', false]);
+        expect(populated).toContain('role="group"');
+        expect(populated).toContain('>Powiązane</span>');
+        expect(populated).toContain('data-layout="list"');
+        expect(populated).toContain('title="[[Audio|Sound]]"');
+        expect(populated).toContain('Edit value 1: Sound');
+        expect(populated).toContain('title="[[Missing]]"');
+        expect(populated).toContain('Remove value 3: false');
+        expect(populated).not.toContain('type="submit"');
+        expect(render('[[Audio]]')).toContain('data-layout="scalar"');
+        expect(render(undefined)).toContain('Add value');
+    });
+
+    it('stages inline values without changing the previous draft and gives the popover first use of keys', () => {
+        const original = [{ id: 0, value: '[[Old]]' }, { id: 1, value: false }];
+        const replaced = stageRelationshipEntry(original, 0, '[[New|Alias]]');
+        expect(replaced).toEqual([{ id: 0, value: '[[New|Alias]]' }, original[1]]);
+        expect(original[0].value).toBe('[[Old]]');
+        expect(stageRelationshipEntry(replaced, -1, ' ')).toBe(replaced);
+        expect(stageRelationshipEntry(replaced, -1, '[[Unresolved]]')).toEqual([
+            ...replaced, { id: -1, value: '[[Unresolved]]' }
+        ]);
+        expect(relationshipEditKey('Enter', false)).toBe('apply');
+        expect(relationshipEditKey('Escape', false)).toBe('cancel');
+        expect(relationshipEditKey('Tab', false)).toBeUndefined();
+        expect(relationshipEditKey('Enter', true)).toBeUndefined();
+        expect(relationshipEditKey('Escape', true)).toBeUndefined();
+    });
+
+    it('generates a picked note link relative to the selected graph note', () => {
+        const file = createTestTFile('Notes/Parent.md');
+        const generateMarkdownLink = vi.fn(() => '[Parent](../Notes/Parent.md)');
+        const picked = vi.fn();
+        const app = { vault: { getMarkdownFiles: () => [file] }, fileManager: { generateMarkdownLink } } as unknown as App;
+        const suggest = attachRelationshipSuggestions(app, {} as HTMLInputElement, 'Topics/Child.md', picked);
+        const options = suggest.getSuggestions('[[');
+        expect(options[0].item).toBe(file);
+        const event = { preventDefault: vi.fn() } as unknown as KeyboardEvent;
+        suggest.open();
+        expect(suggest.showing).toBe(true);
+        suggest.selectSuggestion(options[0], event);
+        expect(event.preventDefault).toHaveBeenCalledOnce();
+        expect(suggest.showing).toBe(false);
+        expect(generateMarkdownLink).toHaveBeenCalledWith(file, 'Topics/Child.md');
+        expect(picked).toHaveBeenCalledWith('[Parent](../Notes/Parent.md)');
+    });
+
+    it('adds, replaces, and clears a property while preserving unrelated frontmatter and existing scalar shape', async () => {
+        const vault = mockVault([...fixtures, { path: 'Other.md', properties: { Typ: 'koncept', keep: true } }]);
+        try {
+            await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section] }));
+            const before = () => vault.controller.readRelationship(section.id, 'Other.md')!;
+            expect(before()).toMatchObject({ property: 'Powiązane', key: undefined, value: undefined });
+            await vault.controller.saveRelationship(section.id, 'Other.md', before(), ['[[Missing]]', '[[Music]]', false]);
+            expect(before().value).toEqual(['[[Missing]]', '[[Music]]', false]);
+            expect(vault.controller.getSnapshot().graphs.get(section.id)?.parents.get('Other.md')).toEqual(['Music.md']);
+            await vault.controller.saveRelationship(section.id, 'Other.md', before(), ['[[Missing]]', '[[Alex]]', false]);
+            expect(vault.frontmatter.get('Other.md')).toEqual({ Typ: 'koncept', keep: true, Powiązane: ['[[Missing]]', '[[Alex]]', false] });
+            await vault.controller.saveRelationship(section.id, 'Other.md', before(), []);
+            expect(before().value).toEqual([]);
+
+            const live = vault.controller.readRelationship(section.id, 'Live Sound.md')!;
+            vault.frontmatter.get('Live Sound.md')!.Powiązane = '[[Audio]]';
+            await vault.controller.saveRelationship(section.id, 'Live Sound.md', { ...live, value: '[[Audio]]' }, ['[[Music]]']);
+            expect(vault.frontmatter.get('Live Sound.md')!.Powiązane).toBe('[[Music]]');
+        } finally {
+            vault.cleanup();
+        }
+    });
+
+    it('protects against concurrent property edits and confirms newly introduced cycles', async () => {
+        const vault = mockVault(fixtures);
+        try {
+            await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section] }));
+            const draft = () => vault.controller.readRelationship(section.id, 'Music.md')!;
+            const stale = structuredClone(draft());
+            vault.frontmatter.get('Music.md')!.Powiązane = ['[[Unresolved]]'];
+            await expect(vault.controller.saveRelationship(section.id, 'Music.md', stale, ['[[Audio]]'])).rejects.toThrow('changed');
+            expect(vault.frontmatter.get('Music.md')!.Powiązane).toEqual(['[[Unresolved]]']);
+            const expected = { ...draft(), key: 'Powiązane', value: ['[[Unresolved]]'] };
+            const links = ['[[Unresolved]]', '[[Audio]]'];
+            expect(await vault.controller.saveRelationship(section.id, 'Music.md', expected, links)).toBe('cycle');
+            expect(vault.frontmatter.get('Music.md')!.Powiązane).toEqual(['[[Unresolved]]']);
+            expect(await vault.controller.saveRelationship(section.id, 'Music.md', expected, links, true)).toBe('saved');
+            expect(vault.controller.getSnapshot().graphs.get(section.id)?.cycles.flat()).toHaveLength(2);
+            expect(await vault.controller.saveRelationship(section.id, 'Music.md', draft(), [...links, '[[Missing]]'])).toBe('saved');
+        } finally {
+            vault.cleanup();
+        }
+    });
+
+    it('opens a dedicated graph tab and reuses the one for the same section', async () => {
+        const vault = mockVault(fixtures);
+        const setViewState = vi.fn(async () => {});
+        const revealLeaf = vi.fn(async () => {});
+        const existing = { getViewState: () => ({ state: { sectionId: section.id } }) };
+        const newLeaf = { setViewState, detach: vi.fn() };
+        const getLeaf = vi.fn(() => newLeaf);
+        Object.assign(vault.controller.app.workspace, {
+            getLeavesOfType: vi.fn(() => [existing]),
+            getLeaf,
+            revealLeaf
+        });
+        try {
+            await revealTopicGraph(vault.controller, section.id);
+            expect(getLeaf).not.toHaveBeenCalled();
+            expect(revealLeaf).toHaveBeenLastCalledWith(existing);
+
+            await revealTopicGraph(vault.controller, organizations.id);
+            expect(getLeaf).toHaveBeenCalledWith('tab');
+            expect(setViewState).toHaveBeenCalledWith({
+                type: TOPIC_GRAPH_VIEW,
+                state: { sectionId: organizations.id },
+                active: true
+            });
+            expect(revealLeaf).toHaveBeenLastCalledWith(newLeaf);
         } finally {
             vault.cleanup();
         }
@@ -727,7 +1048,8 @@ it('mounts bundled styles once per workspace document and removes them on window
     try {
         registerTopicsStyles(plugin);
         expect(main.head.appendChild).toHaveBeenCalledTimes(1);
-        expect(main.style.textContent).toContain('.nn-topics-modal');
+        expect(main.style.textContent).toContain('.nn-topics-settings-group');
+        expect(main.style.textContent).toContain('.nn-topic-graph-content');
         expect(popout.head.appendChild).toHaveBeenCalledTimes(1);
         callbacks.get('window-open')!(null, { document: extra });
         expect(extra.head.appendChild).toHaveBeenCalledTimes(1);
@@ -774,4 +1096,8 @@ it.skipIf(!devVault)('indexes the existing Polish development vault without modi
     expect(graph.roots.length).toBeGreaterThan(0);
     expect([...graph.children.values()].flat().length).toBeGreaterThan(0);
     expect([...graph.leaves.values()].flat().length).toBeGreaterThan(0);
-});
+    const { vertices, edges } = buildTopicGraphDisplay(graph);
+    expect(vertices).toHaveLength(graph.nodes.size);
+    expect(edges).toHaveLength([...graph.parents.values()].flat().length);
+    expect(edges.every(edge => edge.route.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y)))).toBe(true);
+}, 60_000);

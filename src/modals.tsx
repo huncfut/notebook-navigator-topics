@@ -2,7 +2,8 @@ import { Modal, type TFile } from 'obsidian';
 import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { validateConfig, type TopicsConfig } from './config';
-import { reportTopicsError, type TopicsController } from './controller';
+import type { TopicsController } from './controller';
+import { openTopicGraph } from './topic-graph-workspace';
 import type { TopicRequirement, TopicSection } from './graph';
 
 class TopicsModal extends Modal {
@@ -71,10 +72,6 @@ export function openTopicsSettings(controller: TopicsController): void {
     new TopicsModal(controller, 'Topics settings', close => <TopicsSettings controller={controller} close={close} />).open();
 }
 
-export function openCycleRepair(controller: TopicsController, sectionId: string): void {
-    new TopicsModal(controller, 'Repair topic cycles', () => <CycleRepair controller={controller} sectionId={sectionId} />).open();
-}
-
 export function TopicsSettings({ controller, close }: { controller: TopicsController; close: () => void }) {
     const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
     if (!snapshot.ready) return <p>Loading Topics settings…</p>;
@@ -86,6 +83,7 @@ function TopicsSettingsForm({ controller, initial, close }: { controller: Topics
     const [draft, setDraft] = useState(initial);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
+    const hasUnsavedChanges = JSON.stringify(draft) !== JSON.stringify(initial);
 
     function editSection(section: TopicSection, change: Partial<TopicSection>) {
         setDraft(current => ({
@@ -119,17 +117,15 @@ function TopicsSettingsForm({ controller, initial, close }: { controller: Topics
                 void save();
             }}
         >
-            <fieldset disabled={saving}>
-                <label className="nn-topics-field">
-                    <span>Show Topics folder</span>
+            <fieldset className="nn-topics-settings-group" disabled={saving}>
+                <TopicSettingRow name="Show Topics folder">
                     <input
                         type="checkbox"
                         checked={draft.showFolder}
                         onChange={event => setDraft({ ...draft, showFolder: event.target.checked })}
                     />
-                </label>
-                <label className="nn-topics-field">
-                    <span>Open node notes in</span>
+                </TopicSettingRow>
+                <TopicSettingRow name="Open node notes in">
                     <select
                         value={draft.openNodeIn}
                         onChange={event => setDraft({ ...draft, openNodeIn: event.target.value === 'new-tab' ? 'new-tab' : 'current-tab' })}
@@ -137,74 +133,76 @@ function TopicsSettingsForm({ controller, initial, close }: { controller: Topics
                         <option value="current-tab">Current tab</option>
                         <option value="new-tab">New tab</option>
                     </select>
-                </label>
+                </TopicSettingRow>
             </fieldset>
             {draft.sections.map((section, index) => {
                 const graph = snapshot.graphs.get(section.id);
                 const hasCycles = !!graph?.cycles.length;
                 return (
-                    <fieldset className="nn-topics-section-settings" key={section.id} disabled={saving}>
-                        <legend>{section.name.trim() || `Section ${index + 1}`}</legend>
-                        <label className="nn-topics-field">
-                            <span>Section name</span>
+                    <fieldset className="nn-topics-settings-group" key={section.id} disabled={saving}>
+                        <legend className="setting-item-name">{section.name.trim() || `Section ${index + 1}`}</legend>
+                        <TopicSettingRow name="Section name">
                             <input value={section.name} onChange={event => editSection(section, { name: event.target.value })} required />
-                        </label>
-                        <label className="nn-topics-field">
-                            <span>Node filter</span>
+                        </TopicSettingRow>
+                        <TopicSettingRow name="Node filter">
                             <input
                                 value={section.nodeFilter}
                                 placeholder="property=value"
                                 onChange={event => editSection(section, { nodeFilter: event.target.value })}
                                 required
                             />
-                        </label>
-                        <label className="nn-topics-field">
-                            <span>Leaf filter</span>
+                        </TopicSettingRow>
+                        <TopicSettingRow name="Leaf filter">
                             <input
                                 value={section.leafFilter}
                                 placeholder="property=value OR property=other"
                                 onChange={event => editSection(section, { leafFilter: event.target.value })}
                             />
-                        </label>
-                        <label className="nn-topics-field">
-                            <span>Relationship property</span>
+                        </TopicSettingRow>
+                        <TopicSettingRow name="Relationship property">
                             <input
                                 value={section.relationshipProperty}
                                 onChange={event => editSection(section, { relationshipProperty: event.target.value })}
                                 required
                             />
-                        </label>
-                        <label className="nn-topics-field">
-                            <span>Hidden note paths, one per line</span>
+                        </TopicSettingRow>
+                        <TopicSettingRow name="Hidden note paths, one per line">
                             <textarea
                                 rows={3}
                                 value={section.hidden.join('\n')}
                                 onChange={event => editSection(section, { hidden: event.target.value.split('\n') })}
                             />
-                        </label>
-                        {graph && (
+                        </TopicSettingRow>
+                        <div className="nn-topics-actions">
+                            {graph && (
+                                <button
+                                    type="button"
+                                    className={hasCycles ? 'nn-topics-warning' : undefined}
+                                    disabled={hasUnsavedChanges}
+                                    onClick={() => {
+                                        close();
+                                        openTopicGraph(controller, section.id);
+                                    }}
+                                >
+                                    {hasCycles ? 'Topic links form a cycle. Open Topic Graph' : 'Open Topic Graph'}
+                                </button>
+                            )}
                             <button
                                 type="button"
-                                className={hasCycles ? 'nn-topics-warning' : undefined}
-                                onClick={() => openCycleRepair(controller, section.id)}
+                                onClick={() =>
+                                    setDraft(current => ({
+                                        ...current,
+                                        sections: current.sections.filter(item => item.id !== section.id)
+                                    }))
+                                }
                             >
-                                {hasCycles ? 'Topic links form a cycle. Open repair tool' : 'Manage parent links'}
+                                Remove section
                             </button>
-                        )}
-                        <button
-                            type="button"
-                            onClick={() =>
-                                setDraft(current => ({
-                                    ...current,
-                                    sections: current.sections.filter(item => item.id !== section.id)
-                                }))
-                            }
-                        >
-                            Remove section
-                        </button>
+                        </div>
                     </fieldset>
                 );
             })}
+            {hasUnsavedChanges && <p className="setting-item-description">Save settings before opening Topic Graph.</p>}
             {error && <p role="alert">{error}</p>}
             <div className="nn-topics-actions">
                 <button
@@ -237,141 +235,13 @@ function TopicsSettingsForm({ controller, initial, close }: { controller: Topics
     );
 }
 
-type PendingLink = { child: string; parent: string };
-
-export function CycleRepair({ controller, sectionId }: { controller: TopicsController; sectionId: string }) {
-    const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-    const [child, setChild] = useState('');
-    const [parent, setParent] = useState('');
-    const [pending, setPending] = useState<PendingLink | null>(null);
-    const [busy, setBusy] = useState(false);
-    const [error, setError] = useState('');
-    const section = snapshot.config.sections.find(section => section.id === sectionId);
-    const graph = snapshot.graphs.get(sectionId);
-    if (!section || !graph) return <p>This topic section is unavailable.</p>;
-    const linked = graph.parents.get(child)?.includes(parent) ?? false;
-    const nodes = [...graph.nodes].sort(
-        (left, right) => controller.title(left).localeCompare(controller.title(right)) || left.localeCompare(right)
-    );
-
-    async function edit(link: PendingLink, operation: 'add' | 'remove', allowCycle = false) {
-        setBusy(true);
-        setError('');
-        try {
-            const result = await controller.editParent(sectionId, link.child, link.parent, operation, allowCycle);
-            setPending(result === 'cycle' ? link : null);
-        } catch (error) {
-            setError(error instanceof Error ? error.message : 'The link could not be saved.');
-        } finally {
-            setBusy(false);
-        }
-    }
-
+function TopicSettingRow({ name, children }: { name: string; children: ReactNode }) {
     return (
-        <div aria-busy={busy}>
-            <p>
-                Parent links in {section.name} are stored in <strong>{section.relationshipProperty}</strong> on each child note.
-            </p>
-            {graph.cycles.length === 0 ? (
-                <p role="status">No cycles detected.</p>
-            ) : (
-                graph.cycles.map(links => (
-                    <ul className="nn-topics-cycle" key={JSON.stringify(links)}>
-                        {links.map(link => (
-                            <li key={JSON.stringify(link)}>
-                                <button
-                                    type="button"
-                                    className="nn-topics-inline"
-                                    title={link.child}
-                                    onClick={() => void controller.open(link.child, false).catch(reportTopicsError)}
-                                >
-                                    {controller.title(link.child)}
-                                </button>
-                                <span> lists </span>
-                                <button
-                                    type="button"
-                                    className="nn-topics-inline"
-                                    title={link.parent}
-                                    onClick={() => void controller.open(link.parent, false).catch(reportTopicsError)}
-                                >
-                                    {controller.title(link.parent)}
-                                </button>
-                                <span> as a parent </span>
-                                <button type="button" disabled={busy} onClick={() => void edit(link, 'remove')}>
-                                    Remove link
-                                </button>
-                            </li>
-                        ))}
-                    </ul>
-                ))
-            )}
-            <form
-                onSubmit={event => {
-                    event.preventDefault();
-                    if (child && parent && !linked) void edit({ child, parent }, 'add');
-                }}
-            >
-                <fieldset disabled={busy}>
-                    <legend>Edit a parent link</legend>
-                    <label className="nn-topics-field">
-                        <span>Child note</span>
-                        <select
-                            value={child}
-                            onChange={event => {
-                                setChild(event.target.value);
-                                setPending(null);
-                            }}
-                            required
-                        >
-                            <option value="">Select a note</option>
-                            {nodes.map(path => (
-                                <option key={path} value={path}>
-                                    {path}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                    <label className="nn-topics-field">
-                        <span>Parent note</span>
-                        <select
-                            value={parent}
-                            onChange={event => {
-                                setParent(event.target.value);
-                                setPending(null);
-                            }}
-                            required
-                        >
-                            <option value="">Select a note</option>
-                            {nodes.map(path => (
-                                <option key={path} value={path}>
-                                    {path}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                    {linked ? (
-                        <button type="button" onClick={() => void edit({ child, parent }, 'remove')}>
-                            Remove selected link
-                        </button>
-                    ) : (
-                        <button type="submit" disabled={!child || !parent}>
-                            Add link
-                        </button>
-                    )}
-                </fieldset>
-            </form>
-            {pending && (
-                <div className="nn-topics-warning">
-                    <p role="alert">This link would create a cycle.</p>
-                    <button type="button" disabled={busy} onClick={() => void edit(pending, 'add', true)}>
-                        Save anyway
-                    </button>
-                    <button type="button" disabled={busy} onClick={() => setPending(null)}>
-                        Cancel
-                    </button>
-                </div>
-            )}
-            {error && <p role="alert">{error}</p>}
-        </div>
+        <label className="setting-item">
+            <span className="setting-item-info">
+                <span className="setting-item-name">{name}</span>
+            </span>
+            <span className="setting-item-control">{children}</span>
+        </label>
     );
 }

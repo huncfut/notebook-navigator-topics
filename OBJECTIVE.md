@@ -10,4 +10,4 @@ The extension helps users maintain that hierarchy as it changes. It identifies c
 
 Notebook Navigator Topics is an independent extension with version-matched, reversible installation. Its project files live in the expansion repository, and the upstream Notebook Navigator source checkout stays read-only.
 
-See [PLAN.md](PLAN.md) for the approved first-release scope and verification steps.
+See the [first-release plan](plans/first-release.md) for the approved scope and verification steps.

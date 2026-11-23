@@ -1,6 +1,6 @@
 # Notebook Navigator Topics
 
-Browse Obsidian notes as overlapping folder-like hierarchies based on their properties. See [OBJECTIVE.md](OBJECTIVE.md) and [PLAN.md](PLAN.md) for the first-release scope. The [native integration plan](NATIVE-INTEGRATION-PLAN.md) maps the upstream components used by Topics.
+Browse Obsidian notes as overlapping folder-like hierarchies based on their properties. See the [project objective](OBJECTIVE.md) and the [first-release plan](plans/first-release.md) for the original scope. The [native integration plan](plans/native-integration.md) maps the upstream components used by Topics. The [Topic Graph plan](plans/topic-graph.md) describes the proposed cycle repair view.
 
 ## Build and install
 
@@ -15,7 +15,9 @@ Pass a different upstream source path to the build script if needed. Add `--offl
 
 Open Obsidian and go to **Settings → Notebook Navigator → Properties → Topics settings → Configure**. Add a section with a node filter, an optional leaf filter, and the relationship property. The filter syntax supports `property=value` and `OR`, as in `Typ=notatka OR Typ=osoba`. The relationship property holds a single internal link or a list of internal links to parents. For example, a child whose `Powiązane` list contains `[[Music]]` appears beneath Music.
 
-Click a topic row to list its direct leaf notes in Navigator's file pane. Click the topic name to open its note, or the chevron to expand its children. Use Navigator's search bar, sort, and grouping controls within the selected topic. Right-click a node to hide it in its section. Use Navigator’s **Show hidden items** toggle or edit the section’s hide list to unhide it. The section settings let you manage parent links, and any cycle warning opens the same tool.
+Click a topic row to list its direct leaf notes in Navigator's file pane. Click the topic name to open its note, or the chevron to expand its children. Use Navigator's search bar, sort, and grouping controls within the selected topic. Right-click a node to hide it in its section. Use Navigator’s **Show hidden items** toggle or edit the section’s hide list to unhide it.
+
+Click a section’s cycle warning to open **Topic Graph** in a separate tab. Arrows run from parents on the left to children on the right. Highlighted arrows trace cycles, with curved links looping back. Hover over or select an arrow to remove its parent link. The depth slider shows cycles only at **0**, expands one or two links outward at **1** and **2**, and shows the entire topic graph at **Full**. Use **Fit graph** to frame all visible notes and links. The section settings also open the graph. Click a note to edit its linking property or Shift-click to open the note in a new tab. Drag a child note onto a parent to add the link.
 
 On desktop, drop one or more Markdown notes onto a topic to append its link to the section's relationship property. Eligible notes keep their existing metadata. If a note needs a leaf requirement, Topics adds an unambiguous value or asks you to choose. It preserves conflicting scalar values and skips notes that are already topic nodes in that section.
 
