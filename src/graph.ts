@@ -5,6 +5,7 @@ export interface TopicSection {
     leafFilter: string;
     relationshipProperty: string;
     hidden: string[];
+    icons?: Record<string, string>;
 }
 
 export interface TopicNote {

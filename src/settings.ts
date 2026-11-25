@@ -1,32 +1,21 @@
 import type { Setting, SettingDefinitionItem } from 'obsidian';
+import { strings } from '../i18n';
+import { getIconService } from '../services/icons';
 import { ConfirmModal } from '../modals/ConfirmModal';
 import { createGroupDefinition, createRenderDefinition } from '../settings/nativeSettingControls';
 import { addSettingsEditorListButton, addSettingsEditorListItem, createSettingsEditorList } from '../settings/settingsEditorList';
 import type { SettingsTabContext } from '../settings/tabs/SettingsTabContext';
-import type { TopicsConfig } from './config';
+import { defaultTopicIcon, type TopicsConfig } from './config';
 import { getTopicsController, reportTopicsError, type TopicsSnapshot } from './controller';
 import type { TopicSection } from './graph';
+import { openTopicIconEditor } from './topic-icon-editor';
 import { revealTopicGraph } from './topic-graph-workspace';
 import { TopicSectionModal } from './topic-section-modal';
 
 export function createTopicsSettingDefinitions(context: SettingsTabContext): SettingDefinitionItem[] {
     return [
         createGroupDefinition(undefined, [
-            createTopicPreference(
-                context,
-                'Show Topics folder',
-                'Show the Topics folder in the navigation pane.',
-                'showFolder',
-                (setting, change) => {
-                    let refresh: (value: boolean, ready: boolean) => void = () => {};
-                    setting.addToggle(toggle => {
-                        toggle.toggleEl.setAttribute('aria-label', 'Show Topics folder');
-                        toggle.onChange(change);
-                        refresh = (value, ready) => toggle.setValue(value).setDisabled(!ready);
-                    });
-                    return refresh;
-                }
-            ),
+            createTopicToggle(context, 'Show Topics folder', 'Show the Topics folder in the navigation pane.', 'showFolder'),
             createTopicPreference(
                 context,
                 'Open node notes in',
@@ -44,6 +33,20 @@ export function createTopicsSettingDefinitions(context: SettingsTabContext): Set
                 }
             )
         ]),
+        createGroupDefinition('Icons', [
+            createTopicToggle(context, 'Show topic icons', 'Show icons for Topics in the navigation pane.', 'showIcons'),
+            createRenderDefinition({
+                name: 'Default topic icon',
+                desc: 'Use this icon when a topic has no custom or node-note icon.',
+                render: setting => renderDefaultTopicIcon(setting, context)
+            }),
+            createTopicToggle(
+                context,
+                'Use node-note icons',
+                'Use each node note’s Navigator icon before falling back to the default.',
+                'useNodeNoteIcons'
+            )
+        ]),
         createGroupDefinition(undefined, [
             createRenderDefinition({
                 name: 'Sections',
@@ -58,7 +61,19 @@ export function createTopicsSettingDefinitions(context: SettingsTabContext): Set
     ];
 }
 
-function createTopicPreference<Key extends 'showFolder' | 'openNodeIn'>(
+function createTopicToggle(context: SettingsTabContext, name: string, desc: string, key: 'showFolder' | 'showIcons' | 'useNodeNoteIcons') {
+    return createTopicPreference(context, name, desc, key, (setting, change) => {
+        let refresh: (value: boolean, ready: boolean) => void = () => {};
+        setting.addToggle(toggle => {
+            toggle.toggleEl.setAttribute('aria-label', name);
+            toggle.onChange(change);
+            refresh = (value, ready) => toggle.setValue(value).setDisabled(!ready);
+        });
+        return refresh;
+    });
+}
+
+function createTopicPreference<Key extends 'showFolder' | 'showIcons' | 'useNodeNoteIcons' | 'openNodeIn'>(
     { plugin }: SettingsTabContext,
     name: string,
     desc: string,
@@ -87,6 +102,35 @@ function createTopicPreference<Key extends 'showFolder' | 'openNodeIn'>(
             return controller.subscribe(refresh);
         }
     });
+}
+
+function renderDefaultTopicIcon(setting: Setting, { app, plugin }: SettingsTabContext): () => void {
+    const controller = getTopicsController(plugin);
+    setting.setName('Default topic icon').setDesc('Use this icon when a topic has no custom or node-note icon.');
+    const preview = setting.controlEl.createSpan({ cls: 'nn-setting-template-command-icon', attr: { 'aria-hidden': 'true' } });
+    let refresh: () => void = () => {};
+    setting.addButton(button => {
+        button.setButtonText(strings.contextMenu.tag.changeIcon).onClick(() => {
+            const { metadataService } = plugin;
+            if (!metadataService) return;
+            const { defaultIcon } = controller.getSnapshot().config;
+            void openTopicIconEditor(
+                app,
+                metadataService,
+                'Default topic icon',
+                defaultTopicIcon,
+                defaultIcon === defaultTopicIcon ? undefined : defaultIcon,
+                icon => controller.updateConfig(config => ({ ...config, defaultIcon: icon ?? defaultTopicIcon }))
+            ).catch(reportTopicsError);
+        });
+        refresh = () => {
+            const { config, ready } = controller.getSnapshot();
+            getIconService().renderIcon(preview, config.defaultIcon, 16);
+            button.setDisabled(!ready || !plugin.metadataService);
+        };
+    });
+    refresh();
+    return controller.subscribe(refresh);
 }
 
 function renderTopicSections(setting: Setting, { app, plugin }: SettingsTabContext): () => void {

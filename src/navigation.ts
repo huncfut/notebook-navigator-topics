@@ -3,7 +3,9 @@ import type { Plugin } from 'obsidian';
 import { NavigationPaneItemType } from '../types';
 import type { VirtualFolderItem } from '../types/virtualization';
 import { topicRows } from './browse';
+import type { TopicsConfig } from './config';
 import { getTopicsController, type TopicsSnapshot } from './controller';
+import type { TopicSection } from './graph';
 
 export interface TopicSelection {
     sectionId: string;
@@ -74,20 +76,47 @@ export function getSelectedTopic(snapshot: TopicsSnapshot, selection: TopicSelec
     return { section, path: selection.path, leaves: graph.leaves.get(selection.path) ?? [] };
 }
 
+export function getTopicIconOverride(section: TopicSection, path: string): string | undefined {
+    return section.icons && Object.prototype.hasOwnProperty.call(section.icons, path) ? section.icons[path] : undefined;
+}
+
+export function resolveTopicIcon(
+    config: TopicsConfig,
+    node?: { section: TopicSection; path: string },
+    getNoteIcon?: (path: string) => string | undefined
+): string | undefined {
+    if (!config.showIcons) return undefined;
+    if (!node) return config.defaultIcon;
+    return (
+        getTopicIconOverride(node.section, node.path) ??
+        (config.useNodeNoteIcons ? getNoteIcon?.(node.path) : undefined) ??
+        config.defaultIcon
+    );
+}
+
 export function buildTopicNavigationItems(
     snapshot: TopicsSnapshot,
     expandedVirtualFolders: ReadonlySet<string>,
     showHidden: boolean,
     getTitle: (path: string) => string,
-    icons: { closed?: string; open?: string },
+    getNoteIcon?: (path: string) => string | undefined,
     countLeaves?: (paths: readonly string[]) => number
 ): VirtualFolderItem[] {
     if (!snapshot.ready || snapshot.config.sections.length === 0) return [];
     const items: VirtualFolderItem[] = [];
-    const add = (id: string, name: string, level: number, topic: TopicItem, hasChildren: boolean, expanded: boolean, count?: number) => {
+    const defaultIcon = resolveTopicIcon(snapshot.config);
+    const add = (
+        id: string,
+        name: string,
+        level: number,
+        topic: TopicItem,
+        hasChildren: boolean,
+        icon: string | undefined,
+        count?: number
+    ) => {
         items.push({
             type: NavigationPaneItemType.VIRTUAL_FOLDER,
-            data: { id, name, icon: hasChildren && expanded ? icons.open : icons.closed },
+            data: { id, name, icon },
             key: id,
             level,
             topic,
@@ -99,7 +128,7 @@ export function buildTopicNavigationItems(
     const sectionLevel = snapshot.config.showFolder ? 1 : 0;
     if (snapshot.config.showFolder) {
         const expanded = !expandedVirtualFolders.has(topicsGroupId);
-        add(topicsGroupId, 'Topics', 0, { kind: 'group' }, true, expanded);
+        add(topicsGroupId, 'Topics', 0, { kind: 'group' }, true, defaultIcon);
         if (!expanded) return items;
     }
     for (const section of snapshot.config.sections) {
@@ -115,7 +144,7 @@ export function buildTopicNavigationItems(
             sectionLevel,
             { kind: 'section', sectionId: section.id, warning: graph.cycles.length > 0 },
             hasChildren,
-            expanded
+            defaultIcon
         );
         if (!hasChildren || !expanded) continue;
         const prefix = topicBranchPrefix(section.id);
@@ -134,7 +163,7 @@ export function buildTopicNavigationItems(
                 sectionLevel + 1 + row.level,
                 { kind: 'node', selection, hidden: row.hidden },
                 row.hasChildren,
-                row.expanded,
+                resolveTopicIcon(snapshot.config, { section, path: row.path }, getNoteIcon),
                 count
             );
         }

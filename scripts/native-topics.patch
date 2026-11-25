@@ -528,7 +528,7 @@
              </div>
 --- a/src/components/navigationPane/NavigationPaneContent.tsx
 +++ b/src/components/navigationPane/NavigationPaneContent.tsx
-@@ -16,12 +16,16 @@
+@@ -16,12 +16,15 @@
   * along with this program.  If not, see <https://www.gnu.org/licenses/>.
   */
  
@@ -540,12 +540,11 @@
  import { Virtualizer } from '@tanstack/react-virtual';
  import { useExpansionDispatch, useExpansionState } from '../../context/ExpansionContext';
 +import { createScopedSelectionVisibilityCheck } from '../../utils/fileFinder';
-+import { resolveUXIcon } from '../../utils/uxIcons';
 +import { buildTopicNavigationItems, useTopicsSnapshot } from '../../topics/navigation';
  import { useNavigationSelection, useSelectionDispatch } from '../../context/SelectionContext';
  import { useServices, useMetadataService, useCommandQueue } from '../../context/ServicesContext';
  import { useSettingsState, useSettingsUpdate, useActiveProfile } from '../../context/SettingsContext';
-@@ -131,6 +135,7 @@
+@@ -131,6 +134,7 @@
      onRevealFile: (file: TFile) => void;
      onRevealShortcutFile?: (file: TFile) => void;
      onModifySearchWithTag: (tag: string, operator: InclusionOperator) => void;
@@ -553,7 +552,7 @@
      onModifySearchWithProperty: (key: string, value: string | null, operator: InclusionOperator) => void;
      onModifySearchWithDateFilter: (dateToken: string) => void;
  }
-@@ -139,6 +144,7 @@
+@@ -139,6 +143,7 @@
      forwardRef<NavigationPaneHandle, NavigationPaneProps>(function NavigationPane(props, ref) {
          const { app, isMobile, plugin, fileSystemOps, propertyTreeService, tagOperations, propertyOperations } = useServices();
          const commandQueue = useCommandQueue();
@@ -561,7 +560,7 @@
          const metadataService = useMetadataService();
          const expansionState = useExpansionState();
          const expansionDispatch = useExpansionDispatch();
-@@ -178,6 +184,7 @@
+@@ -178,6 +183,7 @@
              onRevealShortcutFile,
              onModifySearchWithTag,
              onModifySearchWithProperty,
@@ -569,7 +568,7 @@
              onModifySearchWithDateFilter,
              uiScale
          } = props;
-@@ -460,6 +467,40 @@
+@@ -460,6 +466,43 @@
              ]
          );
  
@@ -589,12 +588,6 @@
 +                          return file && isVisible(file) ? count + 1 : count;
 +                      }, 0)
 +                : undefined;
-+            const icons = settings.showFolderIcons
-+                ? {
-+                      closed: resolveUXIcon(settings.interfaceIcons, 'nav-folder-closed'),
-+                      open: resolveUXIcon(settings.interfaceIcons, 'nav-folder-open')
-+                  }
-+                : {};
 +            return buildTopicNavigationItems(
 +                topicsSnapshot,
 +                expansionState.expandedVirtualFolders,
@@ -603,14 +596,23 @@
 +                    const file = app.vault.getFileByPath(path);
 +                    return file ? getFileDisplayName(file) : path;
 +                },
-+                icons,
++                path => metadataService.getFileIcon(path),
 +                countLeaves
 +            );
-+        }, [app, expansionState.expandedVirtualFolders, getFileDisplayName, settings, showHiddenItems, topicsSnapshot]);
++        }, [
++            app,
++            expansionState.expandedVirtualFolders,
++            getFileDisplayName,
++            metadataService,
++            props.navigationSourceState.metadataDecorationVersion,
++            settings,
++            showHiddenItems,
++            topicsSnapshot
++        ]);
          const isVisible = uiState.dualPane || uiState.currentSinglePaneView === 'navigation';
          const {
              items,
-@@ -495,7 +536,8 @@
+@@ -495,7 +538,8 @@
              shortcutsExpanded: shortcuts.shortcutsExpanded,
              recentNotesExpanded: shortcuts.recentNotesExpanded,
              pinShortcuts: uiState.pinShortcuts && settings.showShortcuts,
@@ -620,16 +622,17 @@
          });
          folderCountsRef.current = folderCounts;
          tagCountsRef.current = tagCounts;
-@@ -503,6 +545,8 @@
+@@ -503,6 +547,9 @@
  
          const tree = useNavigationPaneTreeInteractions({
              app,
 +            plugin,
 +            topicOpenLocation: topicsSnapshot.config.openNodeIn,
++            topicMetadataService: metadataService,
              commandQueue,
              settings,
              uiState,
-@@ -520,7 +564,8 @@
+@@ -520,7 +567,8 @@
              clearActiveShortcut: shortcuts.clearActiveShortcut,
              openFolderNoteInRightSidebar: folderNote => plugin.openFolderNoteInRightSidebar(folderNote),
              onModifySearchWithTag,
@@ -639,7 +642,7 @@
          });
  
          const searchHighlights = useNavigationSearchHighlights({ searchNavFilters });
-@@ -778,12 +823,7 @@
+@@ -778,12 +826,7 @@
                  return;
              }
  
@@ -653,7 +656,7 @@
              requestScroll(normalizeNavigationPath(itemType, selectedPath), { align: 'auto', itemType });
          }, [requestScroll, selectionState]);
  
-@@ -1012,7 +1052,8 @@
+@@ -1012,7 +1055,8 @@
              containerRef: props.rootContainerRef,
              pathToIndex: keyboardPathToIndex,
              onStartRename: handleStartInlineRename,
@@ -663,7 +666,7 @@
          });
  
          const navigationPaneStyle = useMemo<CSSPropertiesWithVars>(() => {
-@@ -1153,7 +1194,8 @@
+@@ -1153,7 +1197,8 @@
                                  ? shortcuts.shortcutsExpanded
                                  : virtualFolderId === RECENT_NOTES_VIRTUAL_FOLDER_ID
                                    ? shortcuts.recentNotesExpanded
@@ -1136,7 +1139,7 @@
          parsedExcludedFolders,
 --- a/src/hooks/navigationPane/useNavigationPaneTreeInteractions.ts
 +++ b/src/hooks/navigationPane/useNavigationPaneTreeInteractions.ts
-@@ -16,9 +16,19 @@
+@@ -16,9 +16,23 @@
   * along with this program.  If not, see <https://www.gnu.org/licenses/>.
   */
  
@@ -1147,8 +1150,12 @@
 -import { App, TFile, TFolder } from 'obsidian';
 +import { App, Menu, TFile, TFolder, type PaneType, type Plugin } from 'obsidian';
 +import { getTopicsController, reportTopicsError } from '../../topics/controller';
++import { strings } from '../../i18n';
++import type { MetadataService } from '../../services/MetadataService';
++import { setAsyncOnClick } from '../../utils/contextMenu/menuAsyncHelpers';
++import { openTopicIconEditor } from '../../topics/topic-icon-editor';
 +import { openTopicGraph } from '../../topics/topic-graph-workspace';
-+import { topicOccurrenceId, type TopicItem } from '../../topics/navigation';
++import { getTopicIconOverride, topicOccurrenceId, type TopicItem } from '../../topics/navigation';
 +import type { VirtualFolderItem } from '../../types/virtualization';
 +import type { TopicsConfig } from '../../topics/config';
 +import type { VirtualFolderTrailingAction } from '../../components/VirtualFolderItem';
@@ -1157,16 +1164,17 @@
  import type { IPropertyTreeProvider } from '../../interfaces/IPropertyTreeProvider';
  import type { NotebookNavigatorSettings } from '../../settings/types';
  import type { CommandQueueService } from '../../services/CommandQueueService';
-@@ -68,6 +78,8 @@
+@@ -68,6 +82,9 @@
  
  interface UseNavigationPaneTreeInteractionsProps {
      app: App;
 +    plugin: Plugin & Pick<NotebookNavigatorPlugin, 'openSettings'>;
 +    topicOpenLocation: TopicsConfig['openNodeIn'];
++    topicMetadataService?: MetadataService;
      commandQueue: CommandQueueService | null;
      settings: NotebookNavigatorSettings;
      uiState: UIStateLike;
-@@ -85,10 +97,15 @@
+@@ -85,10 +102,15 @@
      clearActiveShortcut: () => void;
      openFolderNoteInRightSidebar: (folderNote: TFile) => Promise<void>;
      onModifySearchWithTag: (tag: string, operator: InclusionOperator) => void;
@@ -1182,16 +1190,17 @@
      handleFolderToggle: (path: string) => void;
      handleFolderClick: (folder: TFolder, options?: { fromShortcut?: boolean }) => void;
      handleFolderNameClick: (folder: TFolder, event?: React.MouseEvent<HTMLSpanElement>) => void;
-@@ -108,6 +125,8 @@
+@@ -108,6 +130,9 @@
  
  export function useNavigationPaneTreeInteractions({
      app,
 +    plugin,
 +    topicOpenLocation,
++    topicMetadataService,
      commandQueue,
      settings,
      uiState,
-@@ -125,7 +144,8 @@
+@@ -125,7 +150,8 @@
      clearActiveShortcut,
      openFolderNoteInRightSidebar,
      onModifySearchWithTag,
@@ -1201,7 +1210,7 @@
  }: UseNavigationPaneTreeInteractionsProps): NavigationPaneTreeInteractionsResult {
      const focusListPaneAfterRightSidebarFolderNoteSelection = useCallback(
          (openContext: FolderNoteOpenContext) => {
-@@ -533,6 +553,111 @@
+@@ -533,6 +559,129 @@
          [clearActiveShortcut, focusAfterTreeSelection, settings.autoExpandNavItems, uiDispatch, uiState.singlePane]
      );
  
@@ -1285,6 +1294,24 @@
 +        const menu = new Menu();
 +        if (topic.kind === 'node') {
 +            const { sectionId, path } = topic.selection;
++            const { config } = controller.getSnapshot();
++            const section = config.sections.find(entry => entry.id === sectionId);
++            if (config.showIcons && topicMetadataService && section) {
++                const note = app.vault.getFileByPath(path);
++                const noteIcon = config.useNodeNoteIcons ? topicMetadataService.getFileIcon(path) : undefined;
++                menu.addItem(item =>
++                    setAsyncOnClick(item.setTitle(strings.contextMenu.tag.changeIcon).setIcon('lucide-image'), () =>
++                        openTopicIconEditor(
++                            app,
++                            topicMetadataService,
++                            note?.basename ?? path,
++                            noteIcon ?? config.defaultIcon,
++                            getTopicIconOverride(section, path),
++                            icon => controller.setTopicIcon(sectionId, note?.path ?? path, icon)
++                        )
++                    )
++                );
++            }
 +            menu.addItem(item =>
 +                item
 +                    .setTitle(topic.hidden ? 'Unhide topic' : 'Hide topic')
@@ -1313,7 +1340,7 @@
      const handleTagClick = useCallback(
          (tagPath: string, event?: React.MouseEvent, options?: { fromShortcut?: boolean }) => {
              const tagNode = findTagNode(tagTree, tagPath);
-@@ -741,6 +866,10 @@
+@@ -741,6 +890,10 @@
      );
  
      const interactions: NavigationPaneTreeInteractionsResult = {
@@ -1324,7 +1351,7 @@
          handleFolderToggle,
          handleFolderClick,
          handleFolderNameClick,
-@@ -760,6 +889,10 @@
+@@ -760,6 +913,10 @@
  
      // Identity-stable facade; calls forward to the latest handlers through a ref
      return useStableHandlerFacade(interactions, [
@@ -2031,32 +2058,146 @@
  import { EXCALIDRAW_BASENAME_SUFFIX } from '../utils/fileNameUtils';
  import { getVirtualTagCollection, VIRTUAL_TAG_COLLECTION_IDS } from '../utils/virtualTagCollections';
  import { getActiveHiddenFolders } from '../utils/vaultProfiles';
-+import { getSelectedTopic, useTopicsSnapshot } from '../topics/navigation';
++import { getSelectedTopic, resolveTopicIcon, useTopicsSnapshot } from '../topics/navigation';
  import { resolveUXIcon } from '../utils/uxIcons';
  import { buildPropertyKeyNodeId, parsePropertyNodeId, type PropertySelectionNodeId } from '../utils/propertyTree';
  import { resolveFolderDisplayName, resolveFolderDisplayPathSegments } from '../utils/folderDisplayName';
-@@ -110,7 +111,9 @@
+@@ -110,7 +111,8 @@
  }
  
  export function useListPaneTitle({ folderDecorationModel, fileItemPillDecorationModel }: UseListPaneTitleParams): UseListPaneTitleResult {
 -    const { app } = useServices();
 +    const { app, plugin } = useServices();
 +    const topicsSnapshot = useTopicsSnapshot(plugin);
-+    const { getFileDisplayName } = useFileCache();
      const settings = useSettingsState();
      const uxPreferences = useUXPreferences();
      const showHiddenItems = uxPreferences.showHiddenItems;
-@@ -296,6 +299,9 @@
+@@ -119,12 +121,15 @@
+     const selectionState = useSelectionState();
+     const selectedFolderPath = selectionState.selectedFolder?.path ?? null;
+     const selectedFolderName = selectionState.selectedFolder?.name ?? null;
+-    const { getTagDisplayPath, getPropertyTree } = useFileCache();
++    const { getFileDisplayName, getTagDisplayPath, getPropertyTree } = useFileCache();
+     const expansionState = useExpansionState();
+     const metadataService = useMetadataService();
+-    const [folderNoteVersion, setFolderNoteVersion] = useState(0);
+-
+-    const watchedFolderNotePaths = useMemo(() => {
++    const [noteMetadataVersion, setNoteMetadataVersion] = useState(0);
++    const topicNotePath =
++        topicsSnapshot.config.showIcons && topicsSnapshot.config.useNodeNoteIcons ? selectionState.selectedTopic?.path : undefined;
++
++    const watchedNotePaths = useMemo(() => {
++        if (topicNotePath && selectionState.selectionType === ItemType.TOPIC) return new Set([topicNotePath]);
+         if (!settings.enableFolderNotes || selectionState.selectionType !== ItemType.FOLDER || !selectedFolderPath) {
+             return new Set<string>();
+         }
+@@ -153,6 +158,7 @@
+ 
+         return targets;
+     }, [
++        topicNotePath,
+         selectedFolderName,
+         selectedFolderPath,
+         app.vault,
+@@ -163,17 +169,17 @@
+     ]);
+ 
+     useEffect(() => {
+-        if (watchedFolderNotePaths.size === 0) {
++        if (watchedNotePaths.size === 0) {
+             return;
+         }
+ 
+         const db = getDBInstance();
+-        const unsubscribers = Array.from(watchedFolderNotePaths).map(path => {
++        const unsubscribers = Array.from(watchedNotePaths).map(path => {
+             return db.onFileContentChange(path, changes => {
+                 if (changes.metadata === undefined) {
+                     return;
+                 }
+-                setFolderNoteVersion(version => version + 1);
++                setNoteMetadataVersion(version => version + 1);
+             });
+         });
+ 
+@@ -182,10 +188,10 @@
+                 unsubscribe();
+             });
+         };
+-    }, [watchedFolderNotePaths]);
++    }, [watchedNotePaths]);
+ 
+     useEffect(() => {
+-        if (watchedFolderNotePaths.size === 0) {
++        if (watchedNotePaths.size === 0) {
+             return;
+         }
+ 
+@@ -194,8 +200,8 @@
+                 return;
+             }
+ 
+-            if (watchedFolderNotePaths.has(file.path) || (typeof oldPath === 'string' && watchedFolderNotePaths.has(oldPath))) {
+-                setFolderNoteVersion(version => version + 1);
++            if (watchedNotePaths.has(file.path) || (typeof oldPath === 'string' && watchedNotePaths.has(oldPath))) {
++                setNoteMetadataVersion(version => version + 1);
+             }
+         };
+ 
+@@ -214,13 +220,14 @@
+             app.vault.offref(deleteRef);
+             app.vault.offref(renameRef);
+         };
+-    }, [app.vault, watchedFolderNotePaths]);
++    }, [app.vault, watchedNotePaths]);
+ 
+     const settingsSignature = useMemo(() => {
+         return JSON.stringify({
+             folderIcons: settings.folderIcons || {},
+             tagIcons: settings.tagIcons || {},
+             propertyIcons: settings.propertyIcons || {},
++            topicNoteIcon: topicNotePath ? settings.fileIcons?.[topicNotePath] : undefined,
+             // Color records are compared by content because metadata services can update them in place.
+             folderColors: settings.folderColors || {},
+             tagColors: settings.tagColors || {},
+@@ -232,11 +239,11 @@
+             useFrontmatterMetadata: settings.useFrontmatterMetadata,
+             frontmatterNameField: settings.frontmatterNameField
+         });
+-    }, [settings]);
++    }, [settings, topicNotePath]);
+ 
+     const metadataVersion = useMemo(() => {
+-        return `${settingsSignature}::${folderNoteVersion}`;
+-    }, [folderNoteVersion, settingsSignature]);
++        return `${settingsSignature}::${noteMetadataVersion}`;
++    }, [noteMetadataVersion, settingsSignature]);
+ 
+     // Determines the icon to display in the list pane header based on selection type and icon settings
+     const iconName = useMemo(() => {
+@@ -296,6 +303,10 @@
              return resolveUXIcon(settings.interfaceIcons, 'nav-property');
          }
  
-+        if (selectionState.selectionType === ItemType.TOPIC && settings.showFolderIcons) {
-+            return resolveUXIcon(settings.interfaceIcons, 'nav-folder-closed');
++        if (selectionState.selectionType === ItemType.TOPIC) {
++            const topic = getSelectedTopic(topicsSnapshot, selectionState.selectedTopic, showHiddenItems);
++            return topic ? (resolveTopicIcon(topicsSnapshot.config, topic, path => metadataService.getFileIcon(path)) ?? '') : '';
 +        }
          return '';
      }, [
          expansionState.expandedFolders,
-@@ -396,6 +402,26 @@
+@@ -303,7 +314,9 @@
+         selectionState.selectedFolder,
+         selectionState.selectedTag,
+         selectionState.selectedProperty,
++        selectionState.selectedTopic,
+         selectionState.selectionType,
++        topicsSnapshot,
+         hiddenFolders,
+         showHiddenItems,
+         settings.interfaceIcons,
+@@ -396,6 +409,26 @@
      ]);
  
      const { desktopTitle, breadcrumbSegments } = useMemo<ListPaneTitleMemoResult>(() => {
@@ -2083,7 +2224,7 @@
          // Forces recompute when folder note metadata changes in IndexedDB.
          void metadataVersion;
          if (selectionState.selectionType === ItemType.FOLDER && selectionState.selectedFolder) {
-@@ -568,6 +594,10 @@
+@@ -568,6 +601,10 @@
          };
      }, [
          app,
@@ -2094,17 +2235,14 @@
          getTagDisplayPath,
          getPropertyTree,
          metadataService,
-@@ -585,7 +615,9 @@
+@@ -585,6 +622,7 @@
          iconName,
          titleColor,
          showIcon:
--            (selectionState.selectionType === ItemType.FOLDER && settings.showFolderIcons && iconName.length > 0) ||
-+            ((selectionState.selectionType === ItemType.FOLDER || selectionState.selectionType === ItemType.TOPIC) &&
-+                settings.showFolderIcons &&
-+                iconName.length > 0) ||
++            (selectionState.selectionType === ItemType.TOPIC && iconName.length > 0) ||
+             (selectionState.selectionType === ItemType.FOLDER && settings.showFolderIcons && iconName.length > 0) ||
              (selectionState.selectionType === ItemType.TAG && settings.showTagIcons && iconName.length > 0) ||
              (selectionState.selectionType === ItemType.PROPERTY && settings.showPropertyIcons && iconName.length > 0),
-         selectionType: selectionState.selectionType
 --- a/src/hooks/useNavigationActions.ts
 +++ b/src/hooks/useNavigationActions.ts
 @@ -16,6 +16,7 @@
