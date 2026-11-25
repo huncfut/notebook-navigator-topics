@@ -11,32 +11,6 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     color: var(--text-warning);
 }
 
-.nn-topics-settings-group {
-    margin: 0;
-    padding: 0;
-    min-width: 0;
-    border: 0;
-}
-
-.nn-topics-settings-group + .nn-topics-settings-group,
-.nn-topics-settings-group > .nn-topics-actions {
-    margin-block-start: var(--size-4-4);
-}
-
-.nn-topics-settings-group legend {
-    padding: 0;
-    font-weight: var(--font-semibold);
-}
-
-.nn-topics-settings-group .setting-item-control {
-    min-width: 0;
-}
-
-.nn-topics-settings-group :is(input, textarea, select) {
-    max-width: 100%;
-}
-
-.nn-topics-field,
 .nn-topics-actions {
     display: flex;
     align-items: center;
@@ -44,11 +18,6 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     gap: 8px;
     justify-content: space-between;
     margin-block: 8px;
-}
-
-.nn-topics-field :is(input:not([type='checkbox']), select, textarea) {
-    flex: 1;
-    min-width: min(100%, 12em);
 }
 
 [data-drop-zone='topic'].nn-drag-over {

@@ -34,12 +34,18 @@ import { buildSearchableNameData, filterListPaneFiles } from '../src/hooks/listP
 import { DEFAULT_SETTINGS } from '../src/settings/defaultSettings';
 import type { IndexedDBStorage } from '../src/storage/IndexedDBStorage';
 import { createTestTFile } from './utils/createTestTFile';
-import { TopicsSettings } from '../src/topics/modals';
+import { SETTINGS_PAGE_GROUP_DEFINITIONS, SETTINGS_PANE_DEFINITION_MAP } from '../src/settings/SettingsPaneDefinitions';
+import type { SettingsTabContext } from '../src/settings/tabs/SettingsTabContext';
 import { graphNodeGesture, TopicGraphCanvas } from '../src/topics/topic-graph-canvas';
 import { buildTopicGraphDisplay, fullTopicGraphView, getGraphBounds, getTopicGraphView, topicCard, type TopicGraphViewMode } from '../src/topics/topic-graph-data';
 import { TopicGraphPanel } from '../src/topics/topic-graph-panel';
 import { revealTopicGraph, TOPIC_GRAPH_VIEW } from '../src/topics/topic-graph-workspace';
 import { registerTopicsStyles } from '../src/topics/styles';
+
+vi.mock('obsidian', async importOriginal => ({
+    ...(await importOriginal<typeof import('obsidian')>()),
+    AbstractInputSuggest: class {}
+}));
 
 const section: TopicSection = {
     id: 'concepts',
@@ -655,7 +661,7 @@ describe('topic drop and filter operands', () => {
         function Harness() {
             handlers = useNavigationPaneTreeInteractions({
                 app,
-                plugin: { app } as Plugin,
+                plugin: Object.assign({ app } as Plugin, { openSettings: vi.fn(() => true) }),
                 topicOpenLocation: 'current-tab',
                 commandQueue: null,
                 settings: { ...DEFAULT_SETTINGS, multiSelectModifier: 'cmdCtrl' },
@@ -831,18 +837,51 @@ describe('Obsidian integration', () => {
         }
     });
 
-    it('renders section configuration, existing warnings, and repair controls with affected links', async () => {
+    it('registers Topics as the last native Navigation Pane settings page', () => {
+        const navigationPages = SETTINGS_PAGE_GROUP_DEFINITIONS.find(group => group.items.includes('tags-properties'));
+        expect(navigationPages?.items.slice(-2)).toEqual(['tags-properties', 'topics']);
+
+        const page = SETTINGS_PANE_DEFINITION_MAP.get('topics')!;
+        expect(page.getLabel()).toBe('Topics');
+        const groups = page.createDefinitions({} as SettingsTabContext);
+        const rows = groups.flatMap(item => 'type' in item && item.type === 'group' ? item.items ?? [] : []);
+        expect(rows.map(row => row.name)).toEqual(['Show Topics folder', 'Open node notes in', 'Sections']);
+    });
+
+    it('saves and removes sections independently of other queued settings changes', async () => {
+        const vault = mockVault(fixtures);
+        try {
+            await vault.controller.saveSection(section);
+            await vault.controller.saveSection(organizations);
+            const original = vault.controller.getSnapshot().config.sections[0];
+
+            await Promise.all([
+                vault.controller.updateConfig(config => ({ ...config, showFolder: false, openNodeIn: 'new-tab' })),
+                vault.controller.setHidden(organizations.id, 'Venue.md', true),
+                vault.controller.saveSection({ ...original, name: 'Renamed' }, original)
+            ]);
+            const config = vault.controller.getSnapshot().config;
+            expect(config).toMatchObject({
+                showFolder: false,
+                openNodeIn: 'new-tab',
+                sections: [{ id: section.id, name: 'Renamed' }, { id: organizations.id, hidden: ['Venue.md'] }]
+            });
+            await expect(vault.controller.saveSection({ ...original, name: 'Stale' }, original)).rejects.toThrow('changed');
+            await expect(vault.controller.saveSection({ ...section, id: 'invalid', nodeFilter: 'Typ' })).rejects.toThrow('property=value');
+            expect(vault.controller.getSnapshot().config).toBe(config);
+
+            await vault.controller.removeSection(section.id);
+            expect(vault.controller.getSnapshot().config.sections.map(entry => entry.id)).toEqual([organizations.id]);
+            await expect(vault.controller.saveSection({ ...original, name: 'Removed' }, original)).rejects.toThrow('changed');
+        } finally {
+            vault.cleanup();
+        }
+    });
+
+    it('renders graph warnings and repair controls for the affected section', async () => {
         const vault = mockVault([...fixtures, note('Loop', 'koncept', 'Loop')]);
         try {
             await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section, organizations] }));
-            const settings = renderToStaticMarkup(createElement(TopicsSettings, { controller: vault.controller, close: vi.fn() }));
-            expect(settings).toContain('Show Topics folder');
-            expect(settings).toContain('Current tab');
-            expect(settings).toContain('New tab');
-            expect(settings).toContain('Powiązane');
-            expect(settings).toContain('Pracuje w');
-            expect(settings).toContain('Topic links form a cycle. Open Topic Graph');
-            expect(settings).toContain('Open Topic Graph');
             const repair = renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id }));
             expect(repair).toContain('<title>Loop.md</title>');
             expect(repair).toContain('Remove link Loop → Loop');
@@ -952,7 +991,7 @@ it('mounts bundled styles once per workspace document and removes them on window
     try {
         registerTopicsStyles(plugin);
         expect(main.head.appendChild).toHaveBeenCalledTimes(1);
-        expect(main.style.textContent).toContain('.nn-topics-settings-group');
+        expect(main.style.textContent).toContain('.nn-topics-actions');
         expect(main.style.textContent).toContain('.nn-topic-graph-content');
         expect(popout.head.appendChild).toHaveBeenCalledTimes(1);
         callbacks.get('window-open')!(null, { document: extra });

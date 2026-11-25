@@ -8,7 +8,8 @@ import {
     wouldIntroduceCycle,
     type TopicGraph,
     type TopicNote,
-    type TopicRequirement
+    type TopicRequirement,
+    type TopicSection
 } from './graph';
 
 import { planTopicDrop, type TopicDropPlan } from './topic-drop';
@@ -155,6 +156,25 @@ export class TopicsController {
             this.snapshot = { ...this.snapshot, config };
             this.refresh();
         });
+    }
+
+    saveSection(draft: TopicSection, original?: TopicSection): Promise<void> {
+        return this.updateConfig(config => {
+            if (!original) return { ...config, sections: [...config.sections, draft] };
+
+            const current = config.sections.find(section => section.id === original.id);
+            if (JSON.stringify(current) !== JSON.stringify(original)) {
+                throw new Error('This topic section changed while the editor was open. Reopen it before editing.');
+            }
+            return {
+                ...config,
+                sections: config.sections.map(section => (section.id === original.id ? { ...draft, id: original.id } : section))
+            };
+        });
+    }
+
+    removeSection(sectionId: string): Promise<void> {
+        return this.updateConfig(config => ({ ...config, sections: config.sections.filter(section => section.id !== sectionId) }));
     }
 
     setHidden(sectionId: string, path: string, hidden: boolean): Promise<void> {

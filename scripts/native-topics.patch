@@ -1140,13 +1140,13 @@
   * along with this program.  If not, see <https://www.gnu.org/licenses/>.
   */
  
++import type NotebookNavigatorPlugin from '../../main';
 +import type { TopicTarget } from '../../topics/topic-filter';
  import React, { useCallback } from 'react';
  import type { Dispatch, SetStateAction } from 'react';
 -import { App, TFile, TFolder } from 'obsidian';
 +import { App, Menu, TFile, TFolder, type PaneType, type Plugin } from 'obsidian';
 +import { getTopicsController, reportTopicsError } from '../../topics/controller';
-+import { openTopicsSettings } from '../../topics/modals';
 +import { openTopicGraph } from '../../topics/topic-graph-workspace';
 +import { topicOccurrenceId, type TopicItem } from '../../topics/navigation';
 +import type { VirtualFolderItem } from '../../types/virtualization';
@@ -1161,7 +1161,7 @@
  
  interface UseNavigationPaneTreeInteractionsProps {
      app: App;
-+    plugin: Plugin;
++    plugin: Plugin & Pick<NotebookNavigatorPlugin, 'openSettings'>;
 +    topicOpenLocation: TopicsConfig['openNodeIn'];
      commandQueue: CommandQueueService | null;
      settings: NotebookNavigatorSettings;
@@ -1264,7 +1264,7 @@
 +            return {
 +                actionLabel: 'Topics settings',
 +                icon: 'lucide-settings',
-+                onClick: () => openTopicsSettings(getTopicsController(plugin)),
++                onClick: () => plugin.openSettings(),
 +                persistent: true
 +            };
 +        }
@@ -1296,7 +1296,7 @@
 +                item
 +                    .setTitle('Topics settings')
 +                    .setIcon('settings')
-+                    .onClick(() => openTopicsSettings(controller))
++                    .onClick(() => plugin.openSettings())
 +            );
 +            if (topic.kind === 'section' && topic.warning) {
 +                menu.addItem(item =>
@@ -2469,7 +2469,26 @@
  import { App, Platform, Plugin, TFile, FileView, TFolder, WorkspaceLeaf, addIcon } from 'obsidian';
  import type { NotebookNavigatorSettings } from './settings/types';
  import { LazyNotebookNavigatorSettingTab } from './settings/LazyNotebookNavigatorSettingTab';
-@@ -428,6 +431,8 @@
+@@ -106,6 +109,7 @@
+ interface ObsidianSettingsModal {
+     open(): void;
+     openTabById(id: string): void;
++    close?(): void;
+ }
+ 
+ interface AppWithSettingsModal extends App {
+@@ -232,6 +236,10 @@
+         }
+     }
+ 
++    public closeSettings(): void {
++        getSettingsModal(this.app)?.close?.();
++    }
++
+     public isDebugLoggingEnabled(): boolean {
+         return this.debugLoggingService?.isEnabled() ?? false;
+     }
+@@ -428,6 +436,8 @@
       * Plugin initialization - called when plugin is enabled
       */
      async onload() {
@@ -2478,7 +2497,9 @@
          // Initialize localStorage before database so version checks work
          localStorage.init(this.app);
          this.debugLoggingService = new DebugLoggingService(this.app, { pluginVersion: this.manifest.version });
-@@ -820,4 +825,9 @@
+@@ -818,6 +828,11 @@
+         });
+ 
          // Register view
 +        this.registerView(TOPIC_GRAPH_VIEW, leaf => {
 +            // eslint-disable-next-line @typescript-eslint/no-require-imports -- Obsidian registerView callbacks must construct views synchronously.
@@ -2488,36 +2509,6 @@
          this.registerView(NOTEBOOK_NAVIGATOR_VIEW, leaf => {
              // eslint-disable-next-line @typescript-eslint/no-require-imports -- Obsidian registerView callbacks must construct views synchronously.
              const { NotebookNavigatorView } = require('./view/NotebookNavigatorView') as typeof import('./view/NotebookNavigatorView');
---- a/src/settings/tabs/PropertiesTab.ts
-+++ b/src/settings/tabs/PropertiesTab.ts
-@@ -16,6 +16,8 @@
-  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
-  */
- 
-+import { getTopicsController } from '../../topics/controller';
-+import { openTopicsSettings } from '../../topics/modals';
- import { Setting } from 'obsidian';
- import type { SettingDefinitionItem } from 'obsidian';
- import { strings } from '../../i18n';
-@@ -29,6 +31,18 @@
-     const { plugin } = context;
- 
-     return [
-+        createGroupDefinition('Topics', [
-+            createRenderDefinition({
-+                name: 'Topics settings',
-+                desc: 'Configure topic sections, relationship properties, and hidden topics.',
-+                render: setting => {
-+                    setting.setName('Topics settings').setDesc('Configure topic sections, relationship properties, and hidden topics.');
-+                    setting.addButton(button =>
-+                        button.setButtonText('Configure').onClick(() => openTopicsSettings(getTopicsController(plugin)))
-+                    );
-+                }
-+            })
-+        ]),
-         createGroupDefinition(heading, [
-             createToggleDefinition('showProperties', {
-                 name: strings.settings.items.showProperties.name,
 --- a/src/settings/types.ts
 +++ b/src/settings/types.ts
 @@ -1031,6 +1031,8 @@
@@ -2930,3 +2921,159 @@
      );
  }
  
+--- a/src/settings/SettingsPaneDefinitions.ts
++++ b/src/settings/SettingsPaneDefinitions.ts
+@@ -17,6 +17,7 @@
+  */
+ 
+ import { strings } from '../i18n';
++import { createTopicsSettingDefinitions } from '../topics/settings';
+ import type { SettingDefinitionItem } from 'obsidian';
+ import { createAdvancedSettingDefinitions } from './tabs/AdvancedTab';
+ import { createCalendarSettingDefinitions } from './tabs/CalendarTab';
+@@ -40,6 +41,7 @@
+     | 'shortcuts'
+     | 'folders'
+     | 'tags-properties'
++    | 'topics'
+     | 'list-pane'
+     | 'file-operations'
+     | 'frontmatter'
+@@ -68,7 +70,7 @@
+     },
+     {
+         getHeading: () => strings.settings.pageGroups.navigationPane,
+-        items: ['navigation-pane', 'shortcuts', 'folders', 'tags-properties']
++        items: ['navigation-pane', 'shortcuts', 'folders', 'tags-properties', 'topics']
+     },
+     {
+         getHeading: () => strings.settings.pageGroups.listPane,
+@@ -118,6 +120,12 @@
+         createDefinitions: createTagsPropertiesSettingDefinitions
+     },
+     {
++        id: 'topics',
++        getLabel: () => 'Topics',
++        getDescription: () => 'Show and configure Topics sections.',
++        createDefinitions: createTopicsSettingDefinitions
++    },
++    {
+         id: 'list-pane',
+         getLabel: () => strings.settings.pages.listPane.label,
+         getDescription: () => strings.settings.pages.listPane.description,
+--- /dev/null
++++ b/src/settings/settingsEditorList.ts
+@@ -0,0 +1,29 @@
++import { setIcon, type Setting } from 'obsidian';
++
++export function createSettingsEditorList(setting: Setting): HTMLUListElement {
++    setting.settingEl.addClass('nn-setting-template-commands');
++    return setting.settingEl.createEl('ul', { cls: 'nn-setting-template-command-list' });
++}
++
++export function addSettingsEditorListItem(list: HTMLUListElement, name: string, summary: string): HTMLDivElement {
++    const row = list.createEl('li', { cls: 'nn-setting-template-command-row' });
++    const text = row.createDiv({ cls: 'nn-setting-template-command-text' });
++    text.createDiv({ cls: 'nn-setting-template-command-name', text: name });
++    text.createDiv({ cls: 'nn-setting-template-command-summary', text: summary });
++    return row.createDiv({ cls: 'nn-setting-template-command-controls' });
++}
++
++export function addSettingsEditorListButton(
++    controls: HTMLElement,
++    icon: string,
++    label: string,
++    onClick: () => void
++): HTMLButtonElement {
++    const button = controls.createEl('button', {
++        cls: 'clickable-icon',
++        attr: { type: 'button', 'aria-label': label, title: label }
++    });
++    setIcon(button, icon);
++    button.addEventListener('click', onClick);
++    return button;
++}
+--- a/src/settings/tabs/TemplateCommandsSection.ts
++++ b/src/settings/tabs/TemplateCommandsSection.ts
+@@ -16,7 +16,7 @@
+  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+  */
+ 
+-import { setIcon, type Setting } from 'obsidian';
++import type { Setting } from 'obsidian';
+ import { strings } from '../../i18n';
+ import { TemplateCommandModal } from '../../modals/TemplateCommandModal';
+ import { createTemplateCommand } from '../../services/commands/templateCommands';
+@@ -25,6 +25,7 @@
+ import { runAsyncAction } from '../../utils/async';
+ import { normalizeCalendarCustomRootFolder } from '../../utils/calendarCustomNotePatterns';
+ import { formatFolderPathForDisplay } from '../../utils/pathUtils';
++import { addSettingsEditorListButton, addSettingsEditorListItem, createSettingsEditorList } from '../settingsEditorList';
+ import type { SettingsTabContext } from './SettingsTabContext';
+ 
+ /**
+@@ -42,8 +43,7 @@
+     // The list is a wrapped full-width child of the setting row rather than part of its description, so the rows
+     // reach the right edge while the add button keeps its place in the control column. The setting element is not
+     // attached to the page yet when this runs, so a sibling element could not be inserted here.
+-    setting.settingEl.addClass('nn-setting-template-commands');
+-    const listEl = setting.settingEl.createEl('ul', { cls: 'nn-setting-template-command-list' });
++    const listEl = createSettingsEditorList(setting);
+ 
+     const openEditor = (command: TemplateCommand, isNew: boolean): void => {
+         new TemplateCommandModal(context.app, {
+@@ -73,35 +73,18 @@
+             return;
+         }
+         commands.forEach(command => {
+-            const rowEl = listEl.createEl('li', { cls: 'nn-setting-template-command-row' });
+-            const textEl = rowEl.createDiv({ cls: 'nn-setting-template-command-text' });
+-            textEl.createDiv({ cls: 'nn-setting-template-command-name', text: command.name || labels.unnamed });
+-            // The summary reads like the path the command produces: the target folder followed by the file name format.
++            // Display the target folder followed by the file name format.
+             const folderDisplay = command.location === 'folder' ? formatFolderPathForDisplay(command.folder) : labels.locationCurrent;
+             const fileName = command.fileNameFormat.trim() || strings.fileSystem.defaultNames.untitled;
+-            textEl.createDiv({
+-                cls: 'nn-setting-template-command-summary',
+-                text: folderDisplay === '/' ? `/${fileName}` : `${folderDisplay}/${fileName}`
+-            });
++            const summary = folderDisplay === '/' ? `/${fileName}` : `${folderDisplay}/${fileName}`;
++            const controlsEl = addSettingsEditorListItem(listEl, command.name || labels.unnamed, summary);
+ 
+-            const controlsEl = rowEl.createDiv({ cls: 'nn-setting-template-command-controls' });
+             if (command.placement !== 'none') {
+                 const iconEl = controlsEl.createSpan({ cls: 'nn-setting-template-command-icon' });
+                 getIconService().renderIcon(iconEl, command.icon, 16);
+             }
+-            const editButton = controlsEl.createEl('button', {
+-                cls: 'clickable-icon',
+-                attr: { type: 'button', 'aria-label': labels.edit }
+-            });
+-            setIcon(editButton, 'lucide-pencil');
+-            editButton.addEventListener('click', () => openEditor(command, false));
+-
+-            const removeButton = controlsEl.createEl('button', {
+-                cls: 'clickable-icon',
+-                attr: { type: 'button', 'aria-label': strings.common.remove }
+-            });
+-            setIcon(removeButton, 'lucide-x');
+-            removeButton.addEventListener('click', () => {
++            addSettingsEditorListButton(controlsEl, 'lucide-pencil', labels.edit, () => openEditor(command, false));
++            addSettingsEditorListButton(controlsEl, 'lucide-x', strings.common.remove, () => {
+                 runAsyncAction(async () => {
+                     plugin.settings.templateCommands = plugin.settings.templateCommands.filter(entry => entry.id !== command.id);
+                     await plugin.saveSettingsAndUpdate();
+--- a/tests/settings/SettingsPaneDefinitions.test.ts
++++ b/tests/settings/SettingsPaneDefinitions.test.ts
+@@ -67,6 +67,11 @@
+         description: 'Tag and property sections, icons, sorting, scope, and inheritance.'
+     },
+     {
++        id: 'topics',
++        label: 'Topics',
++        description: 'Show and configure Topics sections.'
++    },
++    {
+         id: 'list-pane',
+         label: 'List pane',
+         description: 'Sorting, grouping, list modes, pinned notes, and drawing previews.'

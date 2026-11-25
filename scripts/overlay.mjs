@@ -32,6 +32,8 @@ export async function applyOverlay(directory) {
         'controller.ts',
         'browse.ts',
         'modals.tsx',
+        'settings.ts',
+        'topic-section-modal.ts',
         'navigation.ts',
         'topic-drop.ts',
         'topic-filter.ts',
