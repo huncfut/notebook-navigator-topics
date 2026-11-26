@@ -823,7 +823,9 @@ describe('Obsidian integration', () => {
             await vault.controller.editParent(section.id, 'Music.md', 'Audio.md', 'remove');
             expect(vault.frontmatter.get('Music.md')).toEqual({ Typ: 'koncept' });
             expect(vault.controller.getSnapshot().graphs.get(section.id)?.cycles).toEqual([]);
-            const repaired = renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id }));
+            const repaired = renderToStaticMarkup(
+                createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id, onSectionChange: vi.fn() })
+            );
             expect(repaired).toContain('No cycles detected.');
             expect(repaired).toMatch(/<button[^>]*aria-label="Cycle view"[^>]*disabled=""[^>]*aria-pressed="false"/);
         } finally {
@@ -844,25 +846,34 @@ describe('Obsidian integration', () => {
             expect(settings).toContain('Pracuje w');
             expect(settings).toContain('Topic links form a cycle. Open Topic Graph');
             expect(settings).toContain('Open Topic Graph');
-            const repair = renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id }));
+            const renderGraph = (sectionId: string) =>
+                renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId, onSectionChange: vi.fn() }));
+            const repair = renderGraph(section.id);
             expect(repair).toContain('<title>Loop.md</title>');
             expect(repair).toContain('Remove link Loop → Loop');
             expect(repair).toMatch(/<button[^>]*aria-label="Full graph"[^>]*aria-pressed="true"/);
             expect(repair).toMatch(/<button[^>]*aria-label="Cycle view"[^>]*title="Cycle view" aria-pressed="false"/);
             expect(repair).not.toContain('<header');
             expect(repair).toMatch(
-                /nn-topic-graph-stage.*nn-topic-graph-overlay.*nn-topic-graph-heading.*<h2>.*Cycles detected.*aria-label="Graph view".*aria-label="Directed topic graph"/
+                /nn-topic-graph-stage.*nn-topic-graph-overlay.*nn-topic-graph-heading.*<select[^>]*aria-label="Topic section".*Cycles detected.*aria-label="Graph view".*aria-label="Directed topic graph"/
             );
+            expect(repair).toContain('<option value="concepts" selected="">Koncepty</option>');
+            expect(repair).toContain('<option value="organizations">Organizacje</option>');
             expect(repair).toContain('is-cyclic');
             expect(repair).toContain('marker-end=');
             expect(repair).toContain('Focus Music.md');
             expect(repair).not.toContain('nn-topic-graph-editor');
             expect(repair).not.toContain('Venue.md');
-            const healthy = renderToStaticMarkup(
-                createElement(TopicGraphPanel, { controller: vault.controller, sectionId: organizations.id })
-            );
+            const healthy = renderGraph(organizations.id);
+            expect(healthy).toContain('<option value="organizations" selected="">Organizacje</option>');
             expect(healthy).toContain('No cycles detected.');
             expect(healthy).toContain('Focus Venue.md');
+            expect(healthy).not.toContain('Focus Music.md');
+
+            const unavailable = renderGraph('deleted');
+            expect(unavailable).toContain('Choose a topic section</option>');
+            expect(unavailable).toContain('<option value="concepts">Koncepty</option>');
+            expect(unavailable).toContain('This topic section is unavailable.');
         } finally {
             vault.cleanup();
         }

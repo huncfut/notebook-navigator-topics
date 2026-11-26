@@ -89,15 +89,26 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 .nn-topic-graph-heading {
     justify-self: start;
     min-width: 0;
+    max-width: 100%;
     overflow-wrap: anywhere;
 }
 
-.nn-topic-graph-heading h2 {
-    margin: 0;
+select.dropdown.nn-topic-graph-section-select {
+    max-width: 100%;
+    background-color: transparent;
+    box-shadow: none;
     font-size: var(--font-ui-large);
+    font-weight: var(--font-semibold);
+    pointer-events: auto;
+}
+
+select.dropdown.nn-topic-graph-section-select:focus-visible {
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: 2px;
 }
 
 .nn-topic-graph-heading [role='status'] {
+    display: block;
     font-size: var(--font-ui-small);
 }
 
