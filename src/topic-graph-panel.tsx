@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { ObsidianIcon } from '../components/ObsidianIcon';
 import { reportTopicsError, type TopicsController } from './controller';
-import type { TopicLink } from './graph';
 import { TopicGraphCanvas } from './topic-graph-canvas';
 import { buildTopicGraphDisplay, fullTopicGraphView, getTopicGraphView, type TopicGraphViewMode } from './topic-graph-data';
 
@@ -46,8 +46,9 @@ export function TopicGraphPanel({ controller, sectionId }: { controller: TopicsC
         }
     }
 
-    function edit(link: TopicLink, operation: 'add' | 'remove') {
-        return save(allowCycle => controller.editParent(sectionId, link.child, link.parent, operation, allowCycle));
+    function toggleParent(child: string, parent: string) {
+        // A confirmed add should preserve a link that appeared while the warning was open.
+        void save(allowCycle => controller.editParent(sectionId, child, parent, allowCycle ? 'add' : 'toggle', allowCycle));
     }
 
     return (
@@ -58,21 +59,6 @@ export function TopicGraphPanel({ controller, sectionId }: { controller: TopicsC
                     <span role="status" className={hasCycles ? 'nn-topics-warning' : undefined}>
                         {hasCycles ? 'Cycles detected' : 'No cycles detected.'}
                     </span>
-                </div>
-                <div className="nn-topic-graph-views" role="group" aria-label="Graph view">
-                    <button type="button" disabled={view.kind === 'full'} onClick={() => setView(fullTopicGraphView)}>
-                        Back to full
-                    </button>
-                    <button
-                        type="button"
-                        disabled={!hasCycles}
-                        aria-pressed={view.kind === 'cycle'}
-                        onClick={() => {
-                            if (view.kind !== 'cycle') setView({ kind: 'cycle' });
-                        }}
-                    >
-                        Cycle view
-                    </button>
                 </div>
             </header>
             {error && (
@@ -94,6 +80,31 @@ export function TopicGraphPanel({ controller, sectionId }: { controller: TopicsC
                 </div>
             )}
             <div className="nn-topic-graph-stage">
+                <div className="nn-topic-graph-views" role="group" aria-label="Graph view">
+                    <button
+                        type="button"
+                        className="clickable-icon"
+                        aria-label="Full graph"
+                        title="Full graph"
+                        aria-pressed={view.kind === 'full'}
+                        onClick={() => setView(fullTopicGraphView)}
+                    >
+                        <ObsidianIcon name="network" aria-hidden />
+                    </button>
+                    <button
+                        type="button"
+                        className="clickable-icon"
+                        aria-label="Cycle view"
+                        title={hasCycles ? 'Cycle view' : undefined}
+                        disabled={!hasCycles}
+                        aria-pressed={view.kind === 'cycle'}
+                        onClick={() => {
+                            if (view.kind !== 'cycle') setView({ kind: 'cycle' });
+                        }}
+                    >
+                        <ObsidianIcon name="repeat" aria-hidden />
+                    </button>
+                </div>
                 <TopicGraphCanvas
                     display={visibleDisplay}
                     view={view}
@@ -101,10 +112,11 @@ export function TopicGraphPanel({ controller, sectionId }: { controller: TopicsC
                         if (view.kind !== 'node' || view.path !== path) setView({ kind: 'node', path });
                     }}
                     busy={busy || pending !== null}
-                    onConnect={(child, parent) => void edit({ child, parent }, 'add')}
+                    hasParent={(child, parent) => graph.parents.get(child)?.includes(parent) ?? false}
+                    onToggleParent={toggleParent}
                     title={path => controller.title(path)}
                     onOpen={path => void controller.open(path, true).catch(reportTopicsError)}
-                    onRemove={edge => edit(edge, 'remove')}
+                    onRemove={edge => save(() => controller.editParent(sectionId, edge.child, edge.parent, 'remove'))}
                 />
                 {graph.nodes.size === 0 && <p className="nn-topic-graph-empty">No topic nodes in this section.</p>}
             </div>
