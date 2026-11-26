@@ -109,7 +109,6 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 .nn-topic-graph-canvas {
     position: relative;
     overflow: hidden;
-    border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-l);
     background-color: var(--background-primary);
     background-image: radial-gradient(circle, var(--background-modifier-border) 0.8px, transparent 0.8px);
