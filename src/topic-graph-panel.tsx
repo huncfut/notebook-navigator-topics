@@ -53,14 +53,6 @@ export function TopicGraphPanel({ controller, sectionId }: { controller: TopicsC
 
     return (
         <div className="nn-topic-graph" aria-busy={busy}>
-            <header className="nn-topic-graph-toolbar">
-                <div className="nn-topic-graph-heading">
-                    <h2>{section.name}</h2>
-                    <span role="status" className={hasCycles ? 'nn-topics-warning' : undefined}>
-                        {hasCycles ? 'Cycles detected' : 'No cycles detected.'}
-                    </span>
-                </div>
-            </header>
             {error && (
                 <p className="nn-topic-graph-message" role="alert">
                     {error}
@@ -80,30 +72,38 @@ export function TopicGraphPanel({ controller, sectionId }: { controller: TopicsC
                 </div>
             )}
             <div className="nn-topic-graph-stage">
-                <div className="nn-topic-graph-views" role="group" aria-label="Graph view">
-                    <button
-                        type="button"
-                        className="clickable-icon"
-                        aria-label="Full graph"
-                        title="Full graph"
-                        aria-pressed={view.kind === 'full'}
-                        onClick={() => setView(fullTopicGraphView)}
-                    >
-                        <ObsidianIcon name="network" aria-hidden />
-                    </button>
-                    <button
-                        type="button"
-                        className="clickable-icon"
-                        aria-label="Cycle view"
-                        title={hasCycles ? 'Cycle view' : undefined}
-                        disabled={!hasCycles}
-                        aria-pressed={view.kind === 'cycle'}
-                        onClick={() => {
-                            if (view.kind !== 'cycle') setView({ kind: 'cycle' });
-                        }}
-                    >
-                        <ObsidianIcon name="repeat" aria-hidden />
-                    </button>
+                <div className="nn-topic-graph-overlay">
+                    <div className="nn-topic-graph-heading">
+                        <h2>{section.name}</h2>
+                        <span role="status" className={hasCycles ? 'nn-topics-warning' : undefined}>
+                            {hasCycles ? 'Cycles detected' : 'No cycles detected.'}
+                        </span>
+                    </div>
+                    <div className="nn-topic-graph-views" role="group" aria-label="Graph view">
+                        <button
+                            type="button"
+                            className="clickable-icon"
+                            aria-label="Full graph"
+                            title="Full graph"
+                            aria-pressed={view.kind === 'full'}
+                            onClick={() => setView(fullTopicGraphView)}
+                        >
+                            <ObsidianIcon name="network" aria-hidden />
+                        </button>
+                        <button
+                            type="button"
+                            className="clickable-icon"
+                            aria-label="Cycle view"
+                            title={hasCycles ? 'Cycle view' : undefined}
+                            disabled={!hasCycles}
+                            aria-pressed={view.kind === 'cycle'}
+                            onClick={() => {
+                                if (view.kind !== 'cycle') setView({ kind: 'cycle' });
+                            }}
+                        >
+                            <ObsidianIcon name="repeat" aria-hidden />
+                        </button>
+                    </div>
                 </div>
                 <TopicGraphCanvas
                     display={visibleDisplay}

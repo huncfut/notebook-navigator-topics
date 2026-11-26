@@ -849,7 +849,10 @@ describe('Obsidian integration', () => {
             expect(repair).toContain('Remove link Loop → Loop');
             expect(repair).toMatch(/<button[^>]*aria-label="Full graph"[^>]*aria-pressed="true"/);
             expect(repair).toMatch(/<button[^>]*aria-label="Cycle view"[^>]*title="Cycle view" aria-pressed="false"/);
-            expect(repair).toMatch(/<\/header>.*nn-topic-graph-stage.*aria-label="Graph view".*aria-label="Directed topic graph"/);
+            expect(repair).not.toContain('<header');
+            expect(repair).toMatch(
+                /nn-topic-graph-stage.*nn-topic-graph-overlay.*nn-topic-graph-heading.*<h2>.*Cycles detected.*aria-label="Graph view".*aria-label="Directed topic graph"/
+            );
             expect(repair).toContain('is-cyclic');
             expect(repair).toContain('marker-end=');
             expect(repair).toContain('Focus Music.md');

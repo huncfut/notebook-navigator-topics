@@ -70,19 +70,30 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     background: var(--background-primary);
 }
 
-.nn-topic-graph-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--size-4-4);
-    padding: var(--size-4-3) var(--size-4-5);
-    border-bottom: 1px solid var(--background-modifier-border);
+.nn-topic-graph-overlay {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: var(--size-4-2);
+    position: absolute;
+    inset-inline: var(--size-4-3);
+    inset-block-start: var(--size-4-3);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.nn-topic-graph-heading {
+    justify-self: start;
+    min-width: 0;
+    padding: var(--size-2-2) var(--size-4-2);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-primary);
+    overflow-wrap: anywhere;
 }
 
 .nn-topic-graph-heading h2 {
     margin: 0;
-    overflow-wrap: anywhere;
     font-size: var(--font-ui-large);
 }
 
@@ -258,8 +269,6 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 .nn-topic-graph-views,
 .nn-topic-graph-zoom {
     display: flex;
-    position: absolute;
-    inset-inline-end: var(--size-4-3);
     gap: var(--size-2-1);
     padding: var(--size-2-2);
     border: 1px solid var(--background-modifier-border);
@@ -268,8 +277,7 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 }
 
 .nn-topic-graph-views {
-    inset-block-start: var(--size-4-3);
-    z-index: 1;
+    pointer-events: auto;
 }
 
 .nn-topic-graph-views button[aria-pressed='true'] {
@@ -289,6 +297,8 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 }
 
 .nn-topic-graph-zoom {
+    position: absolute;
+    inset-inline-end: var(--size-4-3);
     inset-block-end: var(--size-4-3);
 }
 
