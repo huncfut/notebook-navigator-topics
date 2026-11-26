@@ -87,18 +87,36 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 }
 
 .nn-topic-graph-heading {
+    display: grid;
+    justify-items: start;
     justify-self: start;
+    gap: var(--size-2-1);
     min-width: 0;
     max-width: 100%;
     overflow-wrap: anywhere;
 }
 
-select.dropdown.nn-topic-graph-section-select {
+.nn-topic-graph-section-picker {
+    position: relative;
     max-width: 100%;
-    background-color: transparent;
+}
+
+select.dropdown.nn-topic-graph-section-select {
+    display: block;
+    field-sizing: content;
+    appearance: none;
+    max-width: 100%;
+    height: auto;
+    min-height: var(--input-height, 30px);
+    padding-block: var(--size-2-2);
+    padding-inline: 0 calc(var(--size-4-4) + var(--size-4-3));
+    border: 0;
+    background: transparent;
     box-shadow: none;
     font-size: var(--font-ui-large);
     font-weight: var(--font-semibold);
+    line-height: 1.25;
+    text-overflow: ellipsis;
     pointer-events: auto;
 }
 
@@ -107,8 +125,26 @@ select.dropdown.nn-topic-graph-section-select:focus-visible {
     outline-offset: 2px;
 }
 
+.nn-topic-graph-section-chevron {
+    display: flex;
+    position: absolute;
+    inset-inline-end: var(--size-2-2);
+    inset-block: 0;
+    align-items: center;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+.nn-topic-graph-section-chevron svg {
+    width: var(--size-4-4);
+    height: var(--size-4-4);
+}
+
+.nn-topic-graph-section-select:disabled + .nn-topic-graph-section-chevron {
+    opacity: 0.5;
+}
+
 .nn-topic-graph-heading [role='status'] {
-    display: block;
     font-size: var(--font-ui-small);
 }
 

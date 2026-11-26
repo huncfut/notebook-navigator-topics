@@ -90,24 +90,27 @@ export function TopicGraphPanel({ controller, sectionId, onSectionChange }: Topi
             <div className="nn-topic-graph-stage">
                 <div className="nn-topic-graph-overlay">
                     <div className="nn-topic-graph-heading">
-                        <select
-                            className="dropdown nn-topic-graph-section-select"
-                            aria-label="Topic section"
-                            value={section?.id ?? ''}
-                            disabled={busy || pending !== null}
-                            onChange={event => onSectionChange(event.currentTarget.value)}
-                        >
-                            {!section && (
-                                <option value="" disabled>
-                                    Choose a topic section
-                                </option>
-                            )}
-                            {sections.map(item => (
-                                <option key={item.id} value={item.id}>
-                                    {item.name}
-                                </option>
-                            ))}
-                        </select>
+                        <div className="nn-topic-graph-section-picker">
+                            <select
+                                className="dropdown nn-topic-graph-section-select"
+                                aria-label="Topic section"
+                                value={section?.id ?? ''}
+                                disabled={busy || pending !== null}
+                                onChange={event => onSectionChange(event.currentTarget.value)}
+                            >
+                                {!section && (
+                                    <option value="" disabled>
+                                        Choose a topic section
+                                    </option>
+                                )}
+                                {sections.map(item => (
+                                    <option key={item.id} value={item.id}>
+                                        {item.name}
+                                    </option>
+                                ))}
+                            </select>
+                            <ObsidianIcon name="chevron-down" className="nn-topic-graph-section-chevron" aria-hidden />
+                        </div>
                         {graph && (
                             <span role="status" className={hasCycles ? 'nn-topics-warning' : undefined}>
                                 {hasCycles ? 'Cycles detected' : 'No cycles detected.'}
