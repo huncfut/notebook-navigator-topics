@@ -85,10 +85,6 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 .nn-topic-graph-heading {
     justify-self: start;
     min-width: 0;
-    padding: var(--size-2-2) var(--size-4-2);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: var(--radius-m);
-    background: var(--background-primary);
     overflow-wrap: anywhere;
 }
 
