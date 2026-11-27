@@ -29,7 +29,8 @@ interface GraphCanvasProps {
     title: (path: string) => string;
     onFocus: (path: string) => void;
     onOpen: (path: string) => void;
-    onConnect: (child: string, parent: string) => void;
+    hasParent: (child: string, parent: string) => boolean;
+    onToggleParent: (child: string, parent: string) => void;
     onRemove: (edge: GraphEdge) => Promise<boolean>;
 }
 
@@ -53,11 +54,11 @@ interface PointerStart {
 }
 
 export function graphNodeGesture(child: string, target: string | undefined, moved: boolean, shift: boolean) {
-    if (moved) return target && target !== child ? { action: 'connect' as const, child, parent: target } : undefined;
+    if (moved) return target && target !== child ? { action: 'toggle' as const, child, parent: target } : undefined;
     return target === child ? { action: shift ? ('open' as const) : ('focus' as const), child } : undefined;
 }
 
-export function TopicGraphCanvas({ display, view, busy, title, onFocus, onOpen, onConnect, onRemove }: GraphCanvasProps) {
+export function TopicGraphCanvas({ display, view, busy, title, onFocus, onOpen, hasParent, onToggleParent, onRemove }: GraphCanvasProps) {
     const svg = useRef<SVGSVGElement>(null);
     const drag = useRef<PointerStart | null>(null);
     const [connection, setConnection] = useState<{ child: string; target: string | undefined } | null>(null);
@@ -177,7 +178,7 @@ export function TopicGraphCanvas({ display, view, busy, title, onFocus, onOpen, 
         const canvas = event.currentTarget;
         const target = nodeAt(canvas.ownerDocument.elementFromPoint(event.clientX, event.clientY), canvas);
         const gesture = graphNodeGesture(pointer.node, target, pointerMoved(pointer, event), event.shiftKey);
-        if (gesture?.action === 'connect' && !busy) onConnect(gesture.child, gesture.parent);
+        if (gesture?.action === 'toggle' && !busy) onToggleParent(gesture.child, gesture.parent);
         if (gesture?.action === 'open') onOpen(gesture.child);
         if (gesture?.action === 'focus') onFocus(gesture.child);
     }
@@ -276,7 +277,10 @@ export function TopicGraphCanvas({ display, view, busy, title, onFocus, onOpen, 
                         const className = ['nn-topic-graph-node'];
                         if (vertex.cyclic) className.push('is-cyclic');
                         if (vertex.path === connection?.child) className.push('is-drag-source');
-                        if (vertex.path === connection?.target) className.push('is-drop-target');
+                        if (vertex.path === connection?.target) {
+                            className.push('is-drop-target');
+                            if (hasParent(connection.child, vertex.path)) className.push('is-removal-target');
+                        }
                         return (
                             <g
                                 key={vertex.path}

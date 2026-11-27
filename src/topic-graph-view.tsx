@@ -52,8 +52,15 @@ export class TopicGraphView extends ItemView {
     }
 
     private render(): void {
-        if (this.sectionId) {
-            this.root?.render(<TopicGraphPanel key={this.sectionId} controller={this.controller} sectionId={this.sectionId} />);
-        }
+        this.root?.render(
+            <TopicGraphPanel controller={this.controller} sectionId={this.sectionId} onSectionChange={this.selectSection} />
+        );
     }
+
+    private readonly selectSection = (sectionId: string): void => {
+        if (sectionId === this.sectionId) return;
+        this.sectionId = sectionId;
+        this.render();
+        this.controller.app.workspace.requestSaveLayout();
+    };
 }
