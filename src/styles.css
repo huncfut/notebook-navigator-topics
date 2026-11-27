@@ -26,6 +26,9 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 }
 
 .view-content.nn-topic-graph-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     padding: 0;
     overflow: auto;
 }
@@ -33,55 +36,119 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 .nn-topic-graph {
     --topic-graph-cycle: var(--text-warning);
     --topic-graph-edge: var(--text-muted);
+    --topic-graph-controls-inset: calc(2 * var(--size-4-3));
     display: flex;
+    flex: 1;
     flex-direction: column;
-    min-height: 100%;
+    min-height: 0;
     background: var(--background-primary);
 }
 
-.nn-topic-graph-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--size-4-4);
-    padding: var(--size-4-3) var(--size-4-5);
-    border-bottom: 1px solid var(--background-modifier-border);
+.nn-topic-graph-overlay {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: var(--size-4-2);
+    position: absolute;
+    inset-inline: var(--topic-graph-controls-inset);
+    inset-block-start: var(--topic-graph-controls-inset);
+    z-index: 1;
+    pointer-events: none;
 }
 
-.nn-topic-graph-heading h2 {
-    margin: 0;
+.nn-topic-graph-heading {
+    display: grid;
+    justify-items: start;
+    justify-self: start;
+    gap: var(--size-2-1);
+    min-width: 0;
+    max-width: 100%;
     overflow-wrap: anywhere;
+}
+
+.nn-topic-graph-section-picker {
+    position: relative;
+    max-width: 100%;
+}
+
+select.dropdown.nn-topic-graph-section-select {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-normal);
+    pointer-events: auto;
+}
+
+.nn-topic-graph-section-title {
+    display: block;
+    align-content: center;
+    min-height: var(--input-height, 30px);
+    padding-block: var(--size-2-2);
+    padding-inline: 0 calc(var(--size-4-4) + var(--size-4-3));
     font-size: var(--font-ui-large);
+    font-weight: var(--font-semibold);
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nn-topic-graph-section-select:focus-visible + .nn-topic-graph-section-title {
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: 2px;
+}
+
+.nn-topic-graph-section-chevron {
+    display: flex;
+    position: absolute;
+    inset-inline-end: var(--size-2-2);
+    inset-block: 0;
+    align-items: center;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+.nn-topic-graph-section-chevron svg {
+    width: var(--size-4-4);
+    height: var(--size-4-4);
+}
+
+.nn-topic-graph-section-select:disabled ~ :is(.nn-topic-graph-section-title, .nn-topic-graph-section-chevron) {
+    opacity: 0.5;
 }
 
 .nn-topic-graph-heading [role='status'] {
     font-size: var(--font-ui-small);
 }
 
-.nn-topic-graph-views {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--size-4-2);
-}
-
 .nn-topic-graph-stage {
     display: grid;
-    flex: 1 0 320px;
+    flex: 1;
     position: relative;
     min-width: 0;
-    min-height: 320px;
-    margin: var(--size-4-3);
+    min-height: 0;
+}
+
+.nn-topic-graph-stage::before {
+    --topic-graph-dot-fade: min(64px, 15%);
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle, var(--background-modifier-border) 0.8px, transparent 0.8px);
+    background-size: 22px 22px;
+    mask-image:
+        linear-gradient(to right, transparent, #000 var(--topic-graph-dot-fade), #000 calc(100% - var(--topic-graph-dot-fade)), transparent),
+        linear-gradient(to bottom, transparent, #000 var(--topic-graph-dot-fade), #000 calc(100% - var(--topic-graph-dot-fade)), transparent);
+    mask-composite: intersect;
+    pointer-events: none;
 }
 
 .nn-topic-graph-canvas {
     position: relative;
     overflow: hidden;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: var(--radius-l);
-    background-color: var(--background-primary);
-    background-image: radial-gradient(circle, var(--background-modifier-border) 0.8px, transparent 0.8px);
-    background-size: 22px 22px;
 }
 
 .nn-topic-graph-canvas > svg {
@@ -201,6 +268,11 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     stroke-width: 2.5;
 }
 
+.nn-topic-graph-node.is-removal-target rect {
+    stroke: var(--text-error);
+    stroke-dasharray: 5 3;
+}
+
 .nn-topic-graph-node-label {
     pointer-events: none;
 }
@@ -225,16 +297,40 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     outline: none;
 }
 
+.nn-topic-graph-views,
 .nn-topic-graph-zoom {
     display: flex;
-    position: absolute;
-    inset-inline-end: var(--size-4-3);
-    inset-block-end: var(--size-4-3);
     gap: var(--size-2-1);
     padding: var(--size-2-2);
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-m);
     background: var(--background-primary);
+}
+
+.nn-topic-graph-views {
+    pointer-events: auto;
+}
+
+.nn-topic-graph-views button[aria-pressed='true'] {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.nn-topic-graph-views button:disabled {
+    color: var(--text-faint);
+    opacity: 0.5;
+    cursor: default;
+}
+
+.nn-topic-graph-views button:focus-visible {
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: 2px;
+}
+
+.nn-topic-graph-zoom {
+    position: absolute;
+    inset-inline-end: var(--topic-graph-controls-inset);
+    inset-block-end: var(--topic-graph-controls-inset);
 }
 
 .nn-topic-graph-empty {

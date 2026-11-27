@@ -212,7 +212,7 @@ export class TopicsController {
         sectionId: string,
         childPath: string,
         parentPath: string,
-        operation: 'add' | 'remove',
+        operation: 'add' | 'remove' | 'toggle',
         allowCycle = false
     ): Promise<'saved' | 'cycle'> {
         return this.enqueue(async () => {
@@ -238,12 +238,13 @@ export class TopicsController {
                         return !target || this.resolveLink(target, childPath) !== parentPath;
                     });
 
-                    if (operation === 'remove') {
-                        if (key === undefined || kept.length === entries.length) return;
+                    const linked = kept.length !== entries.length;
+                    if (operation === 'remove' || (operation === 'toggle' && linked)) {
+                        if (key === undefined || !linked) return;
                         if (Array.isArray(current)) properties[key] = kept;
                         else delete properties[key];
                     } else {
-                        if (kept.length !== entries.length) return;
+                        if (linked) return;
                         const parents = graph.parents.get(childPath)?.includes(parentPath)
                             ? new Map(graph.parents).set(childPath, [])
                             : graph.parents;

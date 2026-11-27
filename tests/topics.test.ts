@@ -326,7 +326,8 @@ describe('graph traversal and cycle safety', () => {
                     title: path => path,
                     onFocus: vi.fn(),
                     onOpen: vi.fn(),
-                    onConnect: vi.fn(),
+                    hasParent: vi.fn(() => false),
+                    onToggleParent: vi.fn(),
                     onRemove: vi.fn(async () => true)
                 })
             );
@@ -370,10 +371,10 @@ describe('graph traversal and cycle safety', () => {
         expect(crossings(optimized)).toBe(0);
     });
 
-    it('opens on Shift-click and connects the dragged child to its drop target', () => {
+    it('opens on Shift-click and toggles the dragged child’s link to its drop target', () => {
         expect(graphNodeGesture('A', 'A', false, false)).toEqual({ action: 'focus', child: 'A' });
         expect(graphNodeGesture('A', 'A', false, true)).toEqual({ action: 'open', child: 'A' });
-        expect(graphNodeGesture('A', 'B', true, false)).toEqual({ action: 'connect', child: 'A', parent: 'B' });
+        expect(graphNodeGesture('A', 'B', true, false)).toEqual({ action: 'toggle', child: 'A', parent: 'B' });
         expect(graphNodeGesture('A', 'A', true, false)).toBeUndefined();
         expect(graphNodeGesture('A', undefined, true, false)).toBeUndefined();
         expect(graphNodeGesture('A', 'B', false, false)).toBeUndefined();
@@ -819,7 +820,7 @@ describe('Obsidian integration', () => {
         ]);
         try {
             await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section] }));
-            expect(await vault.controller.editParent(section.id, 'Music.md', 'Audio.md', 'add')).toBe('cycle');
+            expect(await vault.controller.editParent(section.id, 'Music.md', 'Audio.md', 'toggle')).toBe('cycle');
             expect(vault.frontmatter.get('Music.md')?.powiązane).toEqual(['[[Unresolved]]']);
             expect(await vault.controller.editParent(section.id, 'Music.md', 'Audio.md', 'add', true)).toBe('saved');
             expect(vault.frontmatter.get('Music.md')).toEqual({
@@ -828,7 +829,7 @@ describe('Obsidian integration', () => {
                 titles: ['Original']
             });
             expect(vault.controller.getSnapshot().graphs.get(section.id)?.cycles.flat()).toHaveLength(2);
-            await vault.controller.editParent(section.id, 'Music.md', 'Audio.md', 'remove');
+            await vault.controller.editParent(section.id, 'Music.md', 'Audio.md', 'toggle');
             expect(vault.frontmatter.get('Music.md')?.powiązane).toEqual(['[[Unresolved]]']);
             expect(vault.controller.getSnapshot().graphs.get(section.id)?.cycles).toEqual([]);
             await expect(vault.controller.editParent(section.id, 'Music.md', 'Alex.md', 'add')).rejects.toThrow('changed');
@@ -850,9 +851,11 @@ describe('Obsidian integration', () => {
             await vault.controller.editParent(section.id, 'Music.md', 'Audio.md', 'remove');
             expect(vault.frontmatter.get('Music.md')).toEqual({ Typ: 'koncept' });
             expect(vault.controller.getSnapshot().graphs.get(section.id)?.cycles).toEqual([]);
-            const repaired = renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id }));
+            const repaired = renderToStaticMarkup(
+                createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id, onSectionChange: vi.fn() })
+            );
             expect(repaired).toContain('No cycles detected.');
-            expect(repaired).toMatch(/<button[^>]*disabled=[^>]*>Cycle view<\/button>/);
+            expect(repaired).toMatch(/<button[^>]*aria-label="Cycle view"[^>]*disabled=""[^>]*aria-pressed="false"/);
         } finally {
             vault.cleanup();
             vi.useRealTimers();
@@ -927,21 +930,34 @@ describe('Obsidian integration', () => {
         const vault = mockVault([...fixtures, note('Loop', 'koncept', 'Loop')]);
         try {
             await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section, organizations] }));
-            const repair = renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId: section.id }));
+            const renderGraph = (sectionId: string) =>
+                renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId, onSectionChange: vi.fn() }));
+            const repair = renderGraph(section.id);
             expect(repair).toContain('<title>Loop.md</title>');
             expect(repair).toContain('Remove link Loop → Loop');
-            expect(repair).toMatch(/<button[^>]*disabled=""[^>]*>Back to full<\/button>/);
-            expect(repair).toContain('aria-pressed="false">Cycle view');
+            expect(repair).toMatch(/<button[^>]*aria-label="Full graph"[^>]*aria-pressed="true"/);
+            expect(repair).toMatch(/<button[^>]*aria-label="Cycle view"[^>]*title="Cycle view" aria-pressed="false"/);
+            expect(repair).not.toContain('<header');
+            expect(repair).toMatch(
+                /nn-topic-graph-stage.*nn-topic-graph-overlay.*nn-topic-graph-heading.*<select[^>]*aria-label="Topic section".*Cycles detected.*aria-label="Graph view".*aria-label="Directed topic graph"/
+            );
+            expect(repair).toContain('<option value="concepts" selected="">Koncepty</option>');
+            expect(repair).toContain('<option value="organizations">Organizacje</option>');
             expect(repair).toContain('is-cyclic');
             expect(repair).toContain('marker-end=');
             expect(repair).toContain('Focus Music.md');
             expect(repair).not.toContain('nn-topic-graph-editor');
             expect(repair).not.toContain('Venue.md');
-            const healthy = renderToStaticMarkup(
-                createElement(TopicGraphPanel, { controller: vault.controller, sectionId: organizations.id })
-            );
+            const healthy = renderGraph(organizations.id);
+            expect(healthy).toContain('<option value="organizations" selected="">Organizacje</option>');
             expect(healthy).toContain('No cycles detected.');
             expect(healthy).toContain('Focus Venue.md');
+            expect(healthy).not.toContain('Focus Music.md');
+
+            const unavailable = renderGraph('deleted');
+            expect(unavailable).toContain('Choose a topic section</option>');
+            expect(unavailable).toContain('<option value="concepts">Koncepty</option>');
+            expect(unavailable).toContain('This topic section is unavailable.');
         } finally {
             vault.cleanup();
         }
@@ -987,6 +1003,32 @@ describe('Obsidian integration', () => {
             expect(vault.controller.getSnapshot().graphs.get(section.id)?.children.get('Music.md')).toContain('Other.md');
             await vault.controller.editParent(section.id, 'Other.md', 'Music.md', 'remove');
             expect(vault.frontmatter.get('Other.md')).toEqual({ Typ: 'koncept', keep: false, Powiązane: [] });
+        } finally {
+            vault.cleanup();
+        }
+    });
+
+    it('toggles only the directed parent link using current frontmatter', async () => {
+        const vault = mockVault([...fixtures, note('Other', 'koncept', 'Technology'), note('Parent', 'koncept')]);
+        try {
+            await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section] }));
+            const graph = () => vault.controller.getSnapshot().graphs.get(section.id);
+            const toggle = () => vault.controller.editParent(section.id, 'Other.md', 'Parent.md', 'toggle');
+            expect(await toggle()).toBe('saved');
+            expect(graph()?.parents.get('Other.md')).toEqual(['Technology.md', 'Parent.md']);
+            expect(graph()?.parents.has('Parent.md')).toBe(false);
+
+            // A change on disk can reach the frontmatter transaction before the graph snapshot.
+            vault.frontmatter.set('Other.md', { Typ: 'koncept', Powiązane: ['[[Unresolved]]', '[[Technology]]'], keep: false });
+            expect(await toggle()).toBe('saved');
+            expect(vault.frontmatter.get('Other.md')?.Powiązane).toEqual(['[[Unresolved]]', '[[Technology]]', '[[Parent]]']);
+            expect(await toggle()).toBe('saved');
+            expect(vault.frontmatter.get('Other.md')).toEqual({
+                Typ: 'koncept',
+                Powiązane: ['[[Unresolved]]', '[[Technology]]'],
+                keep: false
+            });
+            expect(graph()?.parents.get('Other.md')).toEqual(['Technology.md']);
         } finally {
             vault.cleanup();
         }
