@@ -13,7 +13,9 @@ node install.mjs "/path/to/your/vault"
 
 Pass a different upstream source path to the build script if needed. Add `--offline` to use an already populated npm cache. The installer requires the supported stock Notebook Navigator `3.5.1` bundle in the vault’s default Obsidian configuration directory. Close Obsidian for installation or removal so it cannot update the plugin at the same time.
 
-Open Obsidian and go to **Settings → Notebook Navigator → Properties → Topics settings → Configure**. Add a section with a node filter, an optional leaf filter, and the relationship property. The filter syntax supports `property=value` and `OR`, as in `Typ=notatka OR Typ=osoba`. The relationship property holds a single internal link or a list of internal links to parents. For example, a child whose `Powiązane` list contains `[[Music]]` appears beneath Music.
+Open Obsidian and go to **Settings → Notebook Navigator → Navigation Pane → Topics**. Select **Add section** and set it up with a node filter, an optional leaf filter, and the relationship property. The filter syntax supports `property=value` and `OR`, as in `Typ=notatka OR Typ=osoba`. The relationship property holds a single internal link or a list of internal links to parents. For example, a child whose `Powiązane` list contains `[[Music]]` appears beneath Music.
+
+In the Topics settings page, **Show topic icons** controls Topics independently of folder icons. Set a **Default topic icon** or enable **Use node-note icons** to use icons assigned to the underlying notes. Right-click a topic and choose **Change icon** to override its icon for that section. Use **Use node-note colors** and **Use node-note background colors** to apply the note’s appearance to its topic row.
 
 Click a topic row to list its direct leaf notes in Navigator's file pane. Click the topic name to open its note, or the chevron to expand its children. Use Navigator's search bar, sort, and grouping controls within the selected topic. Right-click a node to hide it in its section. Use Navigator’s **Show hidden items** toggle or edit the section’s hide list to unhide it.
 

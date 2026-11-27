@@ -15,7 +15,7 @@ import { parse } from 'yaml';
 import { App, TFile, type Plugin } from 'obsidian';
 import { describe, expect, it, vi } from 'vitest';
 import { topicRows } from '../src/topics/browse';
-import { defaultConfig, validateConfig } from '../src/topics/config';
+import { defaultConfig, defaultTopicIcon, validateConfig } from '../src/topics/config';
 import { getTopicsController, type TopicsController } from '../src/topics/controller';
 import {
     buildGraph,
@@ -34,12 +34,18 @@ import { buildSearchableNameData, filterListPaneFiles } from '../src/hooks/listP
 import { DEFAULT_SETTINGS } from '../src/settings/defaultSettings';
 import type { IndexedDBStorage } from '../src/storage/IndexedDBStorage';
 import { createTestTFile } from './utils/createTestTFile';
-import { TopicsSettings } from '../src/topics/modals';
+import { SETTINGS_PAGE_GROUP_DEFINITIONS, SETTINGS_PANE_DEFINITION_MAP } from '../src/settings/SettingsPaneDefinitions';
+import type { SettingsTabContext } from '../src/settings/tabs/SettingsTabContext';
 import { graphNodeGesture, TopicGraphCanvas } from '../src/topics/topic-graph-canvas';
 import { buildTopicGraphDisplay, fullTopicGraphView, getGraphBounds, getTopicGraphView, topicCard, type TopicGraphViewMode } from '../src/topics/topic-graph-data';
 import { TopicGraphPanel } from '../src/topics/topic-graph-panel';
 import { revealTopicGraph, TOPIC_GRAPH_VIEW } from '../src/topics/topic-graph-workspace';
 import { registerTopicsStyles } from '../src/topics/styles';
+
+vi.mock('obsidian', async importOriginal => ({
+    ...(await importOriginal<typeof import('obsidian')>()),
+    AbstractInputSuggest: class {}
+}));
 
 const section: TopicSection = {
     id: 'concepts',
@@ -92,6 +98,14 @@ describe('filters and settings', () => {
 
     it.each(['Typ', 'Typ=', '=koncept', 'Typ=koncept OR Typ', 'Typ=koncept OR =x'])('rejects malformed filter %s', expression => {
         expect(() => compileFilter(expression)).toThrow('property=value');
+    });
+
+    it('loads Topics settings saved before icon preferences were added', () => {
+        expect(validateConfig({ showFolder: false, openNodeIn: 'current-tab', sections: [section] })).toEqual({
+            ...defaultConfig,
+            showFolder: false,
+            sections: [section]
+        });
     });
 
     it('validates and normalizes saved settings with no duplicate hidden paths', () => {
@@ -446,7 +460,7 @@ describe('navigation and the file list', () => {
 
     it('feeds native virtual rows and distinct occurrence keys to the navigation index', () => {
         const expanded = new Set(['"Music.md"', '"Technology.md"'].map(key => topicBranchPrefix(section.id) + key));
-        const wrapped = buildTopicNavigationItems(snapshot, expanded, false, title, {});
+        const wrapped = buildTopicNavigationItems(snapshot, expanded, false, title);
         expect(wrapped.every(item => item.type === NavigationPaneItemType.VIRTUAL_FOLDER)).toBe(true);
         expect(wrapped[0].data.id).toBe(topicsGroupId);
         expect(wrapped.filter(item => item.data.name === 'Audio')).toHaveLength(2);
@@ -459,7 +473,7 @@ describe('navigation and the file list', () => {
         expect(second).toBeDefined();
         expect(first).not.toBe(second);
 
-        const collapsed = buildTopicNavigationItems(snapshot, new Set([topicsGroupId]), false, title, {});
+        const collapsed = buildTopicNavigationItems(snapshot, new Set([topicsGroupId]), false, title);
         expect(collapsed).toHaveLength(1);
         const cyclic = graphFor([...fixtures, note('Loop', 'koncept', 'Loop')]);
         const unwrapped = buildTopicNavigationItems(
@@ -473,12 +487,49 @@ describe('navigation and the file list', () => {
             },
             expanded,
             false,
-            title,
-            {}
+            title
         );
         expect(unwrapped.some(item => item.data.id === topicsGroupId)).toBe(false);
         expect(unwrapped.find(item => item.data.name === 'Koncepty')).toMatchObject({ level: 0, topic: { warning: true } });
         expect(unwrapped.find(item => item.data.name === 'Organizacje')).toMatchObject({ level: 0, topic: { warning: false } });
+    });
+
+    it('uses topic overrides, then node-note icons, then the Topics default across navigation rows', () => {
+        const expanded = new Set(['"Music.md"', '"Technology.md"'].map(key => topicBranchPrefix(section.id) + key));
+        const getNoteIcon = vi.fn((path: string) => ['Audio.md', 'Music.md'].includes(path) ? 'lucide-book' : undefined);
+        const customSection = { ...section, icons: { 'Audio.md': 'lucide-headphones' } };
+        const config = { ...snapshot.config, defaultIcon: 'lucide-tags', useNodeNoteIcons: true, sections: [customSection, organizations] };
+        const rows = (settings: typeof config) => buildTopicNavigationItems({ ...snapshot, config: settings }, expanded, false, title, { getFileIcon: getNoteIcon });
+        const items = rows(config);
+        expect(items.filter(item => item.data.name === 'Audio').map(item => item.data.icon)).toEqual(['lucide-headphones', 'lucide-headphones']);
+        expect(items.find(item => item.data.name === 'Music')?.data.icon).toBe('lucide-book');
+        expect(items.find(item => item.data.name === 'Technology')?.data.icon).toBe('lucide-tags');
+        expect(items.find(item => item.data.id === topicsGroupId)?.data.icon).toBe('lucide-tags');
+        expect(getNoteIcon).not.toHaveBeenCalledWith('Audio.md');
+        expect(rows({ ...config, useNodeNoteIcons: false }).find(item => item.data.name === 'Music')?.data.icon).toBe('lucide-tags');
+        expect(rows({ ...config, showIcons: false }).every(item => item.data.icon === undefined)).toBe(true);
+        expect(rows({ ...config, defaultIcon: defaultTopicIcon })[0].data.icon).toBe('lucide-network');
+    });
+
+    it('applies node-note foreground and background colors independently to every occurrence', () => {
+        const expanded = new Set(['"Music.md"', '"Technology.md"'].map(key => topicBranchPrefix(section.id) + key));
+        const noteMetadata = {
+            getFileColor: (path: string) => (path === 'Audio.md' ? '#33aa88' : undefined),
+            getFileBackgroundColor: (path: string) => (path === 'Audio.md' ? '#112233' : undefined)
+        };
+        for (const useNodeNoteColors of [false, true]) {
+            for (const useNodeNoteBackgroundColors of [false, true]) {
+                const config = validateConfig({ ...snapshot.config, useNodeNoteColors, useNodeNoteBackgroundColors });
+                const items = buildTopicNavigationItems({ ...snapshot, config }, expanded, false, title, noteMetadata);
+                const audio = items.filter(item => item.data.name === 'Audio');
+                expect(audio).toHaveLength(2);
+                for (const row of audio) {
+                    expect(row.color).toBe(useNodeNoteColors ? '#33aa88' : undefined);
+                    expect(row.backgroundColor).toBe(useNodeNoteBackgroundColors ? '#112233' : undefined);
+                }
+                expect(items.filter(item => item.data.name !== 'Audio').every(item => !item.color && !item.backgroundColor)).toBe(true);
+            }
+        }
     });
 
     it('uses direct leaves as the base for Navigator filter search and Omnisearch', () => {
@@ -598,8 +649,7 @@ describe('topic drop and filter operands', () => {
             { config: { ...defaultConfig, sections: [section] }, graphs: new Map([[section.id, graphFor(fixtures)]]), ready: true },
             new Set(['Music.md', 'Technology.md'].map(path => topicOccurrenceId({ sectionId: section.id, path, ancestors: [] }))),
             false,
-            path => path,
-            {}
+            path => path
         );
         const audio = rows.filter(row => row.topic?.kind === 'node' && row.topic.selection.path === target.path);
         expect(audio).toHaveLength(2);
@@ -646,8 +696,7 @@ describe('topic drop and filter operands', () => {
             },
             new Set([topicOccurrenceId({ ...selection, path: 'Music.md', ancestors: [] })]),
             false,
-            path => path,
-            {}
+            path => path
         ).find(item => item.key === topicOccurrenceId(selection))!;
         const onSearch = vi.fn();
         const selectionDispatch = vi.fn();
@@ -656,7 +705,7 @@ describe('topic drop and filter operands', () => {
         function Harness() {
             handlers = useNavigationPaneTreeInteractions({
                 app,
-                plugin: { app } as Plugin,
+                plugin: Object.assign({ app } as Plugin, { openSettings: vi.fn(() => true) }),
                 topicOpenLocation: 'current-tab',
                 commandQueue: null,
                 settings: { ...DEFAULT_SETTINGS, multiSelectModifier: 'cmdCtrl' },
@@ -834,18 +883,81 @@ describe('Obsidian integration', () => {
         }
     });
 
-    it('renders section configuration, existing warnings, and repair controls with affected links', async () => {
+    it('registers Topics as the last native Navigation Pane settings page', () => {
+        const navigationPages = SETTINGS_PAGE_GROUP_DEFINITIONS.find(group => group.items.includes('tags-properties'));
+        expect(navigationPages?.items.slice(-2)).toEqual(['tags-properties', 'topics']);
+
+        const page = SETTINGS_PANE_DEFINITION_MAP.get('topics')!;
+        expect(page.getLabel()).toBe('Topics');
+        const groups = page.createDefinitions({} as SettingsTabContext);
+        const rows = groups.flatMap(item => 'type' in item && item.type === 'group' ? item.items ?? [] : []);
+        expect(rows.map(row => row.name)).toEqual([
+            'Show Topics folder',
+            'Open node notes in',
+            'Show topic icons',
+            'Default topic icon',
+            'Use node-note icons',
+            'Use node-note colors',
+            'Use node-note background colors',
+            'Sections'
+        ]);
+    });
+
+    it('saves and removes sections independently of other queued settings changes', async () => {
+        const vault = mockVault(fixtures);
+        try {
+            await vault.controller.saveSection(section);
+            await vault.controller.saveSection(organizations);
+            const original = vault.controller.getSnapshot().config.sections[0];
+
+            await Promise.all([
+                vault.controller.updateConfig(config => ({ ...config, showFolder: false, openNodeIn: 'new-tab' })),
+                vault.controller.setHidden(organizations.id, 'Venue.md', true),
+                vault.controller.saveSection({ ...original, name: 'Renamed' }, original)
+            ]);
+            const config = vault.controller.getSnapshot().config;
+            expect(config).toMatchObject({
+                showFolder: false,
+                openNodeIn: 'new-tab',
+                sections: [{ id: section.id, name: 'Renamed' }, { id: organizations.id, hidden: ['Venue.md'] }]
+            });
+            await expect(vault.controller.saveSection({ ...original, name: 'Stale' }, original)).rejects.toThrow('changed');
+            await expect(vault.controller.saveSection({ ...section, id: 'invalid', nodeFilter: 'Typ' })).rejects.toThrow('property=value');
+            expect(vault.controller.getSnapshot().config).toBe(config);
+
+            await vault.controller.removeSection(section.id);
+            expect(vault.controller.getSnapshot().config.sections.map(entry => entry.id)).toEqual([organizations.id]);
+            await expect(vault.controller.saveSection({ ...original, name: 'Removed' }, original)).rejects.toThrow('changed');
+        } finally {
+            vault.cleanup();
+        }
+    });
+
+    it('saves section-specific topic icons, moves them on rename and restores fallback when cleared', async () => {
+        const vault = mockVault(fixtures);
+        try {
+            await vault.controller.saveSection(section);
+            await vault.controller.saveSection(organizations);
+            const save = vault.controller.setTopicIcon(section.id, 'Folder/Audio.md', 'lucide-headphones');
+            vault.vaultEvents.get('rename')!({ path: 'Moved' }, 'Folder');
+            await save;
+            await vault.controller.updateConfig(config => config);
+            const [edited, other] = vault.controller.getSnapshot().config.sections;
+            expect(edited.icons).toEqual({ 'Moved/Audio.md': 'lucide-headphones' });
+            expect(other.icons).toBeUndefined();
+            expect([...vault.storage.values()].join('')).toContain('Moved/Audio.md');
+
+            await vault.controller.setTopicIcon(section.id, 'Moved/Audio.md', null);
+            expect(vault.controller.getSnapshot().config.sections[0].icons).toBeUndefined();
+        } finally {
+            vault.cleanup();
+        }
+    });
+
+    it('renders graph warnings and repair controls for the affected section', async () => {
         const vault = mockVault([...fixtures, note('Loop', 'koncept', 'Loop')]);
         try {
             await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section, organizations] }));
-            const settings = renderToStaticMarkup(createElement(TopicsSettings, { controller: vault.controller, close: vi.fn() }));
-            expect(settings).toContain('Show Topics folder');
-            expect(settings).toContain('Current tab');
-            expect(settings).toContain('New tab');
-            expect(settings).toContain('Powiązane');
-            expect(settings).toContain('Pracuje w');
-            expect(settings).toContain('Topic links form a cycle. Open Topic Graph');
-            expect(settings).toContain('Open Topic Graph');
             const renderGraph = (sectionId: string) =>
                 renderToStaticMarkup(createElement(TopicGraphPanel, { controller: vault.controller, sectionId, onSectionChange: vi.fn() }));
             const repair = renderGraph(section.id);
@@ -994,7 +1106,7 @@ it('mounts bundled styles once per workspace document and removes them on window
     try {
         registerTopicsStyles(plugin);
         expect(main.head.appendChild).toHaveBeenCalledTimes(1);
-        expect(main.style.textContent).toContain('.nn-topics-settings-group');
+        expect(main.style.textContent).toContain('.nn-topics-actions');
         expect(main.style.textContent).toContain('.nn-topic-graph-content');
         expect(popout.head.appendChild).toHaveBeenCalledTimes(1);
         callbacks.get('window-open')!(null, { document: extra });

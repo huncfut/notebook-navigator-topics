@@ -528,7 +528,7 @@
              </div>
 --- a/src/components/navigationPane/NavigationPaneContent.tsx
 +++ b/src/components/navigationPane/NavigationPaneContent.tsx
-@@ -16,12 +16,16 @@
+@@ -16,12 +16,15 @@
   * along with this program.  If not, see <https://www.gnu.org/licenses/>.
   */
  
@@ -540,12 +540,11 @@
  import { Virtualizer } from '@tanstack/react-virtual';
  import { useExpansionDispatch, useExpansionState } from '../../context/ExpansionContext';
 +import { createScopedSelectionVisibilityCheck } from '../../utils/fileFinder';
-+import { resolveUXIcon } from '../../utils/uxIcons';
 +import { buildTopicNavigationItems, useTopicsSnapshot } from '../../topics/navigation';
  import { useNavigationSelection, useSelectionDispatch } from '../../context/SelectionContext';
  import { useServices, useMetadataService, useCommandQueue } from '../../context/ServicesContext';
  import { useSettingsState, useSettingsUpdate, useActiveProfile } from '../../context/SettingsContext';
-@@ -131,6 +135,7 @@
+@@ -131,6 +134,7 @@
      onRevealFile: (file: TFile) => void;
      onRevealShortcutFile?: (file: TFile) => void;
      onModifySearchWithTag: (tag: string, operator: InclusionOperator) => void;
@@ -553,7 +552,7 @@
      onModifySearchWithProperty: (key: string, value: string | null, operator: InclusionOperator) => void;
      onModifySearchWithDateFilter: (dateToken: string) => void;
  }
-@@ -139,6 +144,7 @@
+@@ -139,6 +143,7 @@
      forwardRef<NavigationPaneHandle, NavigationPaneProps>(function NavigationPane(props, ref) {
          const { app, isMobile, plugin, fileSystemOps, propertyTreeService, tagOperations, propertyOperations } = useServices();
          const commandQueue = useCommandQueue();
@@ -561,7 +560,7 @@
          const metadataService = useMetadataService();
          const expansionState = useExpansionState();
          const expansionDispatch = useExpansionDispatch();
-@@ -178,6 +184,7 @@
+@@ -178,6 +183,7 @@
              onRevealShortcutFile,
              onModifySearchWithTag,
              onModifySearchWithProperty,
@@ -569,7 +568,7 @@
              onModifySearchWithDateFilter,
              uiScale
          } = props;
-@@ -460,6 +467,40 @@
+@@ -460,6 +466,43 @@
              ]
          );
  
@@ -589,12 +588,6 @@
 +                          return file && isVisible(file) ? count + 1 : count;
 +                      }, 0)
 +                : undefined;
-+            const icons = settings.showFolderIcons
-+                ? {
-+                      closed: resolveUXIcon(settings.interfaceIcons, 'nav-folder-closed'),
-+                      open: resolveUXIcon(settings.interfaceIcons, 'nav-folder-open')
-+                  }
-+                : {};
 +            return buildTopicNavigationItems(
 +                topicsSnapshot,
 +                expansionState.expandedVirtualFolders,
@@ -603,14 +596,23 @@
 +                    const file = app.vault.getFileByPath(path);
 +                    return file ? getFileDisplayName(file) : path;
 +                },
-+                icons,
++                metadataService,
 +                countLeaves
 +            );
-+        }, [app, expansionState.expandedVirtualFolders, getFileDisplayName, settings, showHiddenItems, topicsSnapshot]);
++        }, [
++            app,
++            expansionState.expandedVirtualFolders,
++            getFileDisplayName,
++            metadataService,
++            props.navigationSourceState.metadataDecorationVersion,
++            settings,
++            showHiddenItems,
++            topicsSnapshot
++        ]);
          const isVisible = uiState.dualPane || uiState.currentSinglePaneView === 'navigation';
          const {
              items,
-@@ -495,7 +536,8 @@
+@@ -495,7 +538,8 @@
              shortcutsExpanded: shortcuts.shortcutsExpanded,
              recentNotesExpanded: shortcuts.recentNotesExpanded,
              pinShortcuts: uiState.pinShortcuts && settings.showShortcuts,
@@ -620,16 +622,17 @@
          });
          folderCountsRef.current = folderCounts;
          tagCountsRef.current = tagCounts;
-@@ -503,6 +545,8 @@
+@@ -503,6 +547,9 @@
  
          const tree = useNavigationPaneTreeInteractions({
              app,
 +            plugin,
 +            topicOpenLocation: topicsSnapshot.config.openNodeIn,
++            topicMetadataService: metadataService,
              commandQueue,
              settings,
              uiState,
-@@ -520,7 +564,8 @@
+@@ -520,7 +567,8 @@
              clearActiveShortcut: shortcuts.clearActiveShortcut,
              openFolderNoteInRightSidebar: folderNote => plugin.openFolderNoteInRightSidebar(folderNote),
              onModifySearchWithTag,
@@ -639,7 +642,7 @@
          });
  
          const searchHighlights = useNavigationSearchHighlights({ searchNavFilters });
-@@ -778,12 +823,7 @@
+@@ -778,12 +826,7 @@
                  return;
              }
  
@@ -653,7 +656,7 @@
              requestScroll(normalizeNavigationPath(itemType, selectedPath), { align: 'auto', itemType });
          }, [requestScroll, selectionState]);
  
-@@ -1012,7 +1052,8 @@
+@@ -1012,7 +1055,8 @@
              containerRef: props.rootContainerRef,
              pathToIndex: keyboardPathToIndex,
              onStartRename: handleStartInlineRename,
@@ -663,7 +666,7 @@
          });
  
          const navigationPaneStyle = useMemo<CSSPropertiesWithVars>(() => {
-@@ -1153,7 +1194,8 @@
+@@ -1153,7 +1197,8 @@
                                  ? shortcuts.shortcutsExpanded
                                  : virtualFolderId === RECENT_NOTES_VIRTUAL_FOLDER_ID
                                    ? shortcuts.recentNotesExpanded
@@ -1136,19 +1139,23 @@
          parsedExcludedFolders,
 --- a/src/hooks/navigationPane/useNavigationPaneTreeInteractions.ts
 +++ b/src/hooks/navigationPane/useNavigationPaneTreeInteractions.ts
-@@ -16,9 +16,19 @@
+@@ -16,9 +16,23 @@
   * along with this program.  If not, see <https://www.gnu.org/licenses/>.
   */
  
++import type NotebookNavigatorPlugin from '../../main';
 +import type { TopicTarget } from '../../topics/topic-filter';
  import React, { useCallback } from 'react';
  import type { Dispatch, SetStateAction } from 'react';
 -import { App, TFile, TFolder } from 'obsidian';
 +import { App, Menu, TFile, TFolder, type PaneType, type Plugin } from 'obsidian';
 +import { getTopicsController, reportTopicsError } from '../../topics/controller';
-+import { openTopicsSettings } from '../../topics/modals';
++import { strings } from '../../i18n';
++import type { MetadataService } from '../../services/MetadataService';
++import { setAsyncOnClick } from '../../utils/contextMenu/menuAsyncHelpers';
++import { openTopicIconEditor } from '../../topics/topic-icon-editor';
 +import { openTopicGraph } from '../../topics/topic-graph-workspace';
-+import { topicOccurrenceId, type TopicItem } from '../../topics/navigation';
++import { getTopicIconOverride, topicOccurrenceId, type TopicItem } from '../../topics/navigation';
 +import type { VirtualFolderItem } from '../../types/virtualization';
 +import type { TopicsConfig } from '../../topics/config';
 +import type { VirtualFolderTrailingAction } from '../../components/VirtualFolderItem';
@@ -1157,16 +1164,17 @@
  import type { IPropertyTreeProvider } from '../../interfaces/IPropertyTreeProvider';
  import type { NotebookNavigatorSettings } from '../../settings/types';
  import type { CommandQueueService } from '../../services/CommandQueueService';
-@@ -68,6 +78,8 @@
+@@ -68,6 +82,9 @@
  
  interface UseNavigationPaneTreeInteractionsProps {
      app: App;
-+    plugin: Plugin;
++    plugin: Plugin & Pick<NotebookNavigatorPlugin, 'openSettings'>;
 +    topicOpenLocation: TopicsConfig['openNodeIn'];
++    topicMetadataService?: MetadataService;
      commandQueue: CommandQueueService | null;
      settings: NotebookNavigatorSettings;
      uiState: UIStateLike;
-@@ -85,10 +97,15 @@
+@@ -85,10 +102,15 @@
      clearActiveShortcut: () => void;
      openFolderNoteInRightSidebar: (folderNote: TFile) => Promise<void>;
      onModifySearchWithTag: (tag: string, operator: InclusionOperator) => void;
@@ -1182,16 +1190,17 @@
      handleFolderToggle: (path: string) => void;
      handleFolderClick: (folder: TFolder, options?: { fromShortcut?: boolean }) => void;
      handleFolderNameClick: (folder: TFolder, event?: React.MouseEvent<HTMLSpanElement>) => void;
-@@ -108,6 +125,8 @@
+@@ -108,6 +130,9 @@
  
  export function useNavigationPaneTreeInteractions({
      app,
 +    plugin,
 +    topicOpenLocation,
++    topicMetadataService,
      commandQueue,
      settings,
      uiState,
-@@ -125,7 +144,8 @@
+@@ -125,7 +150,8 @@
      clearActiveShortcut,
      openFolderNoteInRightSidebar,
      onModifySearchWithTag,
@@ -1201,7 +1210,7 @@
  }: UseNavigationPaneTreeInteractionsProps): NavigationPaneTreeInteractionsResult {
      const focusListPaneAfterRightSidebarFolderNoteSelection = useCallback(
          (openContext: FolderNoteOpenContext) => {
-@@ -533,6 +553,111 @@
+@@ -533,6 +559,129 @@
          [clearActiveShortcut, focusAfterTreeSelection, settings.autoExpandNavItems, uiDispatch, uiState.singlePane]
      );
  
@@ -1264,7 +1273,7 @@
 +            return {
 +                actionLabel: 'Topics settings',
 +                icon: 'lucide-settings',
-+                onClick: () => openTopicsSettings(getTopicsController(plugin)),
++                onClick: () => plugin.openSettings(),
 +                persistent: true
 +            };
 +        }
@@ -1285,6 +1294,24 @@
 +        const menu = new Menu();
 +        if (topic.kind === 'node') {
 +            const { sectionId, path } = topic.selection;
++            const { config } = controller.getSnapshot();
++            const section = config.sections.find(entry => entry.id === sectionId);
++            if (config.showIcons && topicMetadataService && section) {
++                const note = app.vault.getFileByPath(path);
++                const noteIcon = config.useNodeNoteIcons ? topicMetadataService.getFileIcon(path) : undefined;
++                menu.addItem(item =>
++                    setAsyncOnClick(item.setTitle(strings.contextMenu.tag.changeIcon).setIcon('lucide-image'), () =>
++                        openTopicIconEditor(
++                            app,
++                            topicMetadataService,
++                            note?.basename ?? path,
++                            noteIcon ?? config.defaultIcon,
++                            getTopicIconOverride(section, path),
++                            icon => controller.setTopicIcon(sectionId, note?.path ?? path, icon)
++                        )
++                    )
++                );
++            }
 +            menu.addItem(item =>
 +                item
 +                    .setTitle(topic.hidden ? 'Unhide topic' : 'Hide topic')
@@ -1296,7 +1323,7 @@
 +                item
 +                    .setTitle('Topics settings')
 +                    .setIcon('settings')
-+                    .onClick(() => openTopicsSettings(controller))
++                    .onClick(() => plugin.openSettings())
 +            );
 +            if (topic.kind === 'section' && topic.warning) {
 +                menu.addItem(item =>
@@ -1313,7 +1340,7 @@
      const handleTagClick = useCallback(
          (tagPath: string, event?: React.MouseEvent, options?: { fromShortcut?: boolean }) => {
              const tagNode = findTagNode(tagTree, tagPath);
-@@ -741,6 +866,10 @@
+@@ -741,6 +890,10 @@
      );
  
      const interactions: NavigationPaneTreeInteractionsResult = {
@@ -1324,7 +1351,7 @@
          handleFolderToggle,
          handleFolderClick,
          handleFolderNameClick,
-@@ -760,6 +889,10 @@
+@@ -760,6 +913,10 @@
  
      // Identity-stable facade; calls forward to the latest handlers through a ref
      return useStableHandlerFacade(interactions, [
@@ -2031,32 +2058,146 @@
  import { EXCALIDRAW_BASENAME_SUFFIX } from '../utils/fileNameUtils';
  import { getVirtualTagCollection, VIRTUAL_TAG_COLLECTION_IDS } from '../utils/virtualTagCollections';
  import { getActiveHiddenFolders } from '../utils/vaultProfiles';
-+import { getSelectedTopic, useTopicsSnapshot } from '../topics/navigation';
++import { getSelectedTopic, resolveTopicIcon, useTopicsSnapshot } from '../topics/navigation';
  import { resolveUXIcon } from '../utils/uxIcons';
  import { buildPropertyKeyNodeId, parsePropertyNodeId, type PropertySelectionNodeId } from '../utils/propertyTree';
  import { resolveFolderDisplayName, resolveFolderDisplayPathSegments } from '../utils/folderDisplayName';
-@@ -110,7 +111,9 @@
+@@ -110,7 +111,8 @@
  }
  
  export function useListPaneTitle({ folderDecorationModel, fileItemPillDecorationModel }: UseListPaneTitleParams): UseListPaneTitleResult {
 -    const { app } = useServices();
 +    const { app, plugin } = useServices();
 +    const topicsSnapshot = useTopicsSnapshot(plugin);
-+    const { getFileDisplayName } = useFileCache();
      const settings = useSettingsState();
      const uxPreferences = useUXPreferences();
      const showHiddenItems = uxPreferences.showHiddenItems;
-@@ -296,6 +299,9 @@
+@@ -119,12 +121,15 @@
+     const selectionState = useSelectionState();
+     const selectedFolderPath = selectionState.selectedFolder?.path ?? null;
+     const selectedFolderName = selectionState.selectedFolder?.name ?? null;
+-    const { getTagDisplayPath, getPropertyTree } = useFileCache();
++    const { getFileDisplayName, getTagDisplayPath, getPropertyTree } = useFileCache();
+     const expansionState = useExpansionState();
+     const metadataService = useMetadataService();
+-    const [folderNoteVersion, setFolderNoteVersion] = useState(0);
+-
+-    const watchedFolderNotePaths = useMemo(() => {
++    const [noteMetadataVersion, setNoteMetadataVersion] = useState(0);
++    const topicNotePath =
++        topicsSnapshot.config.showIcons && topicsSnapshot.config.useNodeNoteIcons ? selectionState.selectedTopic?.path : undefined;
++
++    const watchedNotePaths = useMemo(() => {
++        if (topicNotePath && selectionState.selectionType === ItemType.TOPIC) return new Set([topicNotePath]);
+         if (!settings.enableFolderNotes || selectionState.selectionType !== ItemType.FOLDER || !selectedFolderPath) {
+             return new Set<string>();
+         }
+@@ -153,6 +158,7 @@
+ 
+         return targets;
+     }, [
++        topicNotePath,
+         selectedFolderName,
+         selectedFolderPath,
+         app.vault,
+@@ -163,17 +169,17 @@
+     ]);
+ 
+     useEffect(() => {
+-        if (watchedFolderNotePaths.size === 0) {
++        if (watchedNotePaths.size === 0) {
+             return;
+         }
+ 
+         const db = getDBInstance();
+-        const unsubscribers = Array.from(watchedFolderNotePaths).map(path => {
++        const unsubscribers = Array.from(watchedNotePaths).map(path => {
+             return db.onFileContentChange(path, changes => {
+                 if (changes.metadata === undefined) {
+                     return;
+                 }
+-                setFolderNoteVersion(version => version + 1);
++                setNoteMetadataVersion(version => version + 1);
+             });
+         });
+ 
+@@ -182,10 +188,10 @@
+                 unsubscribe();
+             });
+         };
+-    }, [watchedFolderNotePaths]);
++    }, [watchedNotePaths]);
+ 
+     useEffect(() => {
+-        if (watchedFolderNotePaths.size === 0) {
++        if (watchedNotePaths.size === 0) {
+             return;
+         }
+ 
+@@ -194,8 +200,8 @@
+                 return;
+             }
+ 
+-            if (watchedFolderNotePaths.has(file.path) || (typeof oldPath === 'string' && watchedFolderNotePaths.has(oldPath))) {
+-                setFolderNoteVersion(version => version + 1);
++            if (watchedNotePaths.has(file.path) || (typeof oldPath === 'string' && watchedNotePaths.has(oldPath))) {
++                setNoteMetadataVersion(version => version + 1);
+             }
+         };
+ 
+@@ -214,13 +220,14 @@
+             app.vault.offref(deleteRef);
+             app.vault.offref(renameRef);
+         };
+-    }, [app.vault, watchedFolderNotePaths]);
++    }, [app.vault, watchedNotePaths]);
+ 
+     const settingsSignature = useMemo(() => {
+         return JSON.stringify({
+             folderIcons: settings.folderIcons || {},
+             tagIcons: settings.tagIcons || {},
+             propertyIcons: settings.propertyIcons || {},
++            topicNoteIcon: topicNotePath ? settings.fileIcons?.[topicNotePath] : undefined,
+             // Color records are compared by content because metadata services can update them in place.
+             folderColors: settings.folderColors || {},
+             tagColors: settings.tagColors || {},
+@@ -232,11 +239,11 @@
+             useFrontmatterMetadata: settings.useFrontmatterMetadata,
+             frontmatterNameField: settings.frontmatterNameField
+         });
+-    }, [settings]);
++    }, [settings, topicNotePath]);
+ 
+     const metadataVersion = useMemo(() => {
+-        return `${settingsSignature}::${folderNoteVersion}`;
+-    }, [folderNoteVersion, settingsSignature]);
++        return `${settingsSignature}::${noteMetadataVersion}`;
++    }, [noteMetadataVersion, settingsSignature]);
+ 
+     // Determines the icon to display in the list pane header based on selection type and icon settings
+     const iconName = useMemo(() => {
+@@ -296,6 +303,10 @@
              return resolveUXIcon(settings.interfaceIcons, 'nav-property');
          }
  
-+        if (selectionState.selectionType === ItemType.TOPIC && settings.showFolderIcons) {
-+            return resolveUXIcon(settings.interfaceIcons, 'nav-folder-closed');
++        if (selectionState.selectionType === ItemType.TOPIC) {
++            const topic = getSelectedTopic(topicsSnapshot, selectionState.selectedTopic, showHiddenItems);
++            return topic ? (resolveTopicIcon(topicsSnapshot.config, topic, path => metadataService.getFileIcon(path)) ?? '') : '';
 +        }
          return '';
      }, [
          expansionState.expandedFolders,
-@@ -396,6 +402,26 @@
+@@ -303,7 +314,9 @@
+         selectionState.selectedFolder,
+         selectionState.selectedTag,
+         selectionState.selectedProperty,
++        selectionState.selectedTopic,
+         selectionState.selectionType,
++        topicsSnapshot,
+         hiddenFolders,
+         showHiddenItems,
+         settings.interfaceIcons,
+@@ -396,6 +409,26 @@
      ]);
  
      const { desktopTitle, breadcrumbSegments } = useMemo<ListPaneTitleMemoResult>(() => {
@@ -2083,7 +2224,7 @@
          // Forces recompute when folder note metadata changes in IndexedDB.
          void metadataVersion;
          if (selectionState.selectionType === ItemType.FOLDER && selectionState.selectedFolder) {
-@@ -568,6 +594,10 @@
+@@ -568,6 +601,10 @@
          };
      }, [
          app,
@@ -2094,17 +2235,14 @@
          getTagDisplayPath,
          getPropertyTree,
          metadataService,
-@@ -585,7 +615,9 @@
+@@ -585,6 +622,7 @@
          iconName,
          titleColor,
          showIcon:
--            (selectionState.selectionType === ItemType.FOLDER && settings.showFolderIcons && iconName.length > 0) ||
-+            ((selectionState.selectionType === ItemType.FOLDER || selectionState.selectionType === ItemType.TOPIC) &&
-+                settings.showFolderIcons &&
-+                iconName.length > 0) ||
++            (selectionState.selectionType === ItemType.TOPIC && iconName.length > 0) ||
+             (selectionState.selectionType === ItemType.FOLDER && settings.showFolderIcons && iconName.length > 0) ||
              (selectionState.selectionType === ItemType.TAG && settings.showTagIcons && iconName.length > 0) ||
              (selectionState.selectionType === ItemType.PROPERTY && settings.showPropertyIcons && iconName.length > 0),
-         selectionType: selectionState.selectionType
 --- a/src/hooks/useNavigationActions.ts
 +++ b/src/hooks/useNavigationActions.ts
 @@ -16,6 +16,7 @@
@@ -2469,7 +2607,26 @@
  import { App, Platform, Plugin, TFile, FileView, TFolder, WorkspaceLeaf, addIcon } from 'obsidian';
  import type { NotebookNavigatorSettings } from './settings/types';
  import { LazyNotebookNavigatorSettingTab } from './settings/LazyNotebookNavigatorSettingTab';
-@@ -428,6 +431,8 @@
+@@ -106,6 +109,7 @@
+ interface ObsidianSettingsModal {
+     open(): void;
+     openTabById(id: string): void;
++    close?(): void;
+ }
+ 
+ interface AppWithSettingsModal extends App {
+@@ -232,6 +236,10 @@
+         }
+     }
+ 
++    public closeSettings(): void {
++        getSettingsModal(this.app)?.close?.();
++    }
++
+     public isDebugLoggingEnabled(): boolean {
+         return this.debugLoggingService?.isEnabled() ?? false;
+     }
+@@ -428,6 +436,8 @@
       * Plugin initialization - called when plugin is enabled
       */
      async onload() {
@@ -2478,7 +2635,9 @@
          // Initialize localStorage before database so version checks work
          localStorage.init(this.app);
          this.debugLoggingService = new DebugLoggingService(this.app, { pluginVersion: this.manifest.version });
-@@ -820,4 +825,9 @@
+@@ -818,6 +828,11 @@
+         });
+ 
          // Register view
 +        this.registerView(TOPIC_GRAPH_VIEW, leaf => {
 +            // eslint-disable-next-line @typescript-eslint/no-require-imports -- Obsidian registerView callbacks must construct views synchronously.
@@ -2488,36 +2647,6 @@
          this.registerView(NOTEBOOK_NAVIGATOR_VIEW, leaf => {
              // eslint-disable-next-line @typescript-eslint/no-require-imports -- Obsidian registerView callbacks must construct views synchronously.
              const { NotebookNavigatorView } = require('./view/NotebookNavigatorView') as typeof import('./view/NotebookNavigatorView');
---- a/src/settings/tabs/PropertiesTab.ts
-+++ b/src/settings/tabs/PropertiesTab.ts
-@@ -16,6 +16,8 @@
-  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
-  */
- 
-+import { getTopicsController } from '../../topics/controller';
-+import { openTopicsSettings } from '../../topics/modals';
- import { Setting } from 'obsidian';
- import type { SettingDefinitionItem } from 'obsidian';
- import { strings } from '../../i18n';
-@@ -29,6 +31,18 @@
-     const { plugin } = context;
- 
-     return [
-+        createGroupDefinition('Topics', [
-+            createRenderDefinition({
-+                name: 'Topics settings',
-+                desc: 'Configure topic sections, relationship properties, and hidden topics.',
-+                render: setting => {
-+                    setting.setName('Topics settings').setDesc('Configure topic sections, relationship properties, and hidden topics.');
-+                    setting.addButton(button =>
-+                        button.setButtonText('Configure').onClick(() => openTopicsSettings(getTopicsController(plugin)))
-+                    );
-+                }
-+            })
-+        ]),
-         createGroupDefinition(heading, [
-             createToggleDefinition('showProperties', {
-                 name: strings.settings.items.showProperties.name,
 --- a/src/settings/types.ts
 +++ b/src/settings/types.ts
 @@ -1031,6 +1031,8 @@
@@ -2930,3 +3059,159 @@
      );
  }
  
+--- a/src/settings/SettingsPaneDefinitions.ts
++++ b/src/settings/SettingsPaneDefinitions.ts
+@@ -17,6 +17,7 @@
+  */
+ 
+ import { strings } from '../i18n';
++import { createTopicsSettingDefinitions } from '../topics/settings';
+ import type { SettingDefinitionItem } from 'obsidian';
+ import { createAdvancedSettingDefinitions } from './tabs/AdvancedTab';
+ import { createCalendarSettingDefinitions } from './tabs/CalendarTab';
+@@ -40,6 +41,7 @@
+     | 'shortcuts'
+     | 'folders'
+     | 'tags-properties'
++    | 'topics'
+     | 'list-pane'
+     | 'file-operations'
+     | 'frontmatter'
+@@ -68,7 +70,7 @@
+     },
+     {
+         getHeading: () => strings.settings.pageGroups.navigationPane,
+-        items: ['navigation-pane', 'shortcuts', 'folders', 'tags-properties']
++        items: ['navigation-pane', 'shortcuts', 'folders', 'tags-properties', 'topics']
+     },
+     {
+         getHeading: () => strings.settings.pageGroups.listPane,
+@@ -118,6 +120,12 @@
+         createDefinitions: createTagsPropertiesSettingDefinitions
+     },
+     {
++        id: 'topics',
++        getLabel: () => 'Topics',
++        getDescription: () => 'Show and configure Topics sections.',
++        createDefinitions: createTopicsSettingDefinitions
++    },
++    {
+         id: 'list-pane',
+         getLabel: () => strings.settings.pages.listPane.label,
+         getDescription: () => strings.settings.pages.listPane.description,
+--- /dev/null
++++ b/src/settings/settingsEditorList.ts
+@@ -0,0 +1,29 @@
++import { setIcon, type Setting } from 'obsidian';
++
++export function createSettingsEditorList(setting: Setting): HTMLUListElement {
++    setting.settingEl.addClass('nn-setting-template-commands');
++    return setting.settingEl.createEl('ul', { cls: 'nn-setting-template-command-list' });
++}
++
++export function addSettingsEditorListItem(list: HTMLUListElement, name: string, summary: string): HTMLDivElement {
++    const row = list.createEl('li', { cls: 'nn-setting-template-command-row' });
++    const text = row.createDiv({ cls: 'nn-setting-template-command-text' });
++    text.createDiv({ cls: 'nn-setting-template-command-name', text: name });
++    text.createDiv({ cls: 'nn-setting-template-command-summary', text: summary });
++    return row.createDiv({ cls: 'nn-setting-template-command-controls' });
++}
++
++export function addSettingsEditorListButton(
++    controls: HTMLElement,
++    icon: string,
++    label: string,
++    onClick: () => void
++): HTMLButtonElement {
++    const button = controls.createEl('button', {
++        cls: 'clickable-icon',
++        attr: { type: 'button', 'aria-label': label, title: label }
++    });
++    setIcon(button, icon);
++    button.addEventListener('click', onClick);
++    return button;
++}
+--- a/src/settings/tabs/TemplateCommandsSection.ts
++++ b/src/settings/tabs/TemplateCommandsSection.ts
+@@ -16,7 +16,7 @@
+  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+  */
+ 
+-import { setIcon, type Setting } from 'obsidian';
++import type { Setting } from 'obsidian';
+ import { strings } from '../../i18n';
+ import { TemplateCommandModal } from '../../modals/TemplateCommandModal';
+ import { createTemplateCommand } from '../../services/commands/templateCommands';
+@@ -25,6 +25,7 @@
+ import { runAsyncAction } from '../../utils/async';
+ import { normalizeCalendarCustomRootFolder } from '../../utils/calendarCustomNotePatterns';
+ import { formatFolderPathForDisplay } from '../../utils/pathUtils';
++import { addSettingsEditorListButton, addSettingsEditorListItem, createSettingsEditorList } from '../settingsEditorList';
+ import type { SettingsTabContext } from './SettingsTabContext';
+ 
+ /**
+@@ -42,8 +43,7 @@
+     // The list is a wrapped full-width child of the setting row rather than part of its description, so the rows
+     // reach the right edge while the add button keeps its place in the control column. The setting element is not
+     // attached to the page yet when this runs, so a sibling element could not be inserted here.
+-    setting.settingEl.addClass('nn-setting-template-commands');
+-    const listEl = setting.settingEl.createEl('ul', { cls: 'nn-setting-template-command-list' });
++    const listEl = createSettingsEditorList(setting);
+ 
+     const openEditor = (command: TemplateCommand, isNew: boolean): void => {
+         new TemplateCommandModal(context.app, {
+@@ -73,35 +73,18 @@
+             return;
+         }
+         commands.forEach(command => {
+-            const rowEl = listEl.createEl('li', { cls: 'nn-setting-template-command-row' });
+-            const textEl = rowEl.createDiv({ cls: 'nn-setting-template-command-text' });
+-            textEl.createDiv({ cls: 'nn-setting-template-command-name', text: command.name || labels.unnamed });
+-            // The summary reads like the path the command produces: the target folder followed by the file name format.
++            // Display the target folder followed by the file name format.
+             const folderDisplay = command.location === 'folder' ? formatFolderPathForDisplay(command.folder) : labels.locationCurrent;
+             const fileName = command.fileNameFormat.trim() || strings.fileSystem.defaultNames.untitled;
+-            textEl.createDiv({
+-                cls: 'nn-setting-template-command-summary',
+-                text: folderDisplay === '/' ? `/${fileName}` : `${folderDisplay}/${fileName}`
+-            });
++            const summary = folderDisplay === '/' ? `/${fileName}` : `${folderDisplay}/${fileName}`;
++            const controlsEl = addSettingsEditorListItem(listEl, command.name || labels.unnamed, summary);
+ 
+-            const controlsEl = rowEl.createDiv({ cls: 'nn-setting-template-command-controls' });
+             if (command.placement !== 'none') {
+                 const iconEl = controlsEl.createSpan({ cls: 'nn-setting-template-command-icon' });
+                 getIconService().renderIcon(iconEl, command.icon, 16);
+             }
+-            const editButton = controlsEl.createEl('button', {
+-                cls: 'clickable-icon',
+-                attr: { type: 'button', 'aria-label': labels.edit }
+-            });
+-            setIcon(editButton, 'lucide-pencil');
+-            editButton.addEventListener('click', () => openEditor(command, false));
+-
+-            const removeButton = controlsEl.createEl('button', {
+-                cls: 'clickable-icon',
+-                attr: { type: 'button', 'aria-label': strings.common.remove }
+-            });
+-            setIcon(removeButton, 'lucide-x');
+-            removeButton.addEventListener('click', () => {
++            addSettingsEditorListButton(controlsEl, 'lucide-pencil', labels.edit, () => openEditor(command, false));
++            addSettingsEditorListButton(controlsEl, 'lucide-x', strings.common.remove, () => {
+                 runAsyncAction(async () => {
+                     plugin.settings.templateCommands = plugin.settings.templateCommands.filter(entry => entry.id !== command.id);
+                     await plugin.saveSettingsAndUpdate();
+--- a/tests/settings/SettingsPaneDefinitions.test.ts
++++ b/tests/settings/SettingsPaneDefinitions.test.ts
+@@ -67,6 +67,11 @@
+         description: 'Tag and property sections, icons, sorting, scope, and inheritance.'
+     },
+     {
++        id: 'topics',
++        label: 'Topics',
++        description: 'Show and configure Topics sections.'
++    },
++    {
+         id: 'list-pane',
+         label: 'List pane',
+         description: 'Sorting, grouping, list modes, pinned notes, and drawing previews.'

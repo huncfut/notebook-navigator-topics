@@ -1,12 +1,28 @@
 import { compileFilter, type TopicSection } from './graph';
 
+export const defaultTopicIcon = 'lucide-network';
+
 export interface TopicsConfig {
     showFolder: boolean;
+    showIcons: boolean;
+    defaultIcon: string;
+    useNodeNoteIcons: boolean;
+    useNodeNoteColors: boolean;
+    useNodeNoteBackgroundColors: boolean;
     openNodeIn: 'current-tab' | 'new-tab';
     sections: TopicSection[];
 }
 
-export const defaultConfig: TopicsConfig = { showFolder: true, openNodeIn: 'current-tab', sections: [] };
+export const defaultConfig: TopicsConfig = {
+    showFolder: true,
+    showIcons: true,
+    defaultIcon: defaultTopicIcon,
+    useNodeNoteIcons: false,
+    useNodeNoteColors: false,
+    useNodeNoteBackgroundColors: false,
+    openNodeIn: 'current-tab',
+    sections: []
+};
 
 export function validateConfig(value: unknown): TopicsConfig {
     if (!value || typeof value !== 'object') throw new Error('Topics settings must be an object.');
@@ -40,14 +56,29 @@ export function validateConfig(value: unknown): TopicsConfig {
         compileFilter(section.nodeFilter);
         compileFilter(section.leafFilter);
         ids.add(section.id);
+        const { icons, ...fields } = section;
+        const validIcons =
+            icons && typeof icons === 'object' && !Array.isArray(icons)
+                ? Object.entries(icons).filter(([path, icon]) => path.length > 0 && typeof icon === 'string' && icon.trim())
+                : [];
         return {
-            ...section,
+            ...fields,
             name: section.name.trim(),
             nodeFilter: section.nodeFilter.trim(),
             leafFilter: section.leafFilter.trim(),
             relationshipProperty: section.relationshipProperty.trim(),
-            hidden: [...new Set(section.hidden.map(path => path.trim()).filter(Boolean))]
+            hidden: [...new Set(section.hidden.map(path => path.trim()).filter(Boolean))],
+            ...(validIcons.length > 0 ? { icons: Object.fromEntries(validIcons.map(([path, icon]) => [path, icon.trim()])) } : {})
         };
     });
-    return { showFolder: config.showFolder, openNodeIn: config.openNodeIn, sections };
+    return {
+        showFolder: config.showFolder,
+        showIcons: typeof config.showIcons === 'boolean' ? config.showIcons : defaultConfig.showIcons,
+        defaultIcon: typeof config.defaultIcon === 'string' ? config.defaultIcon.trim() || defaultTopicIcon : defaultTopicIcon,
+        useNodeNoteIcons: typeof config.useNodeNoteIcons === 'boolean' ? config.useNodeNoteIcons : defaultConfig.useNodeNoteIcons,
+        useNodeNoteColors: config.useNodeNoteColors === true,
+        useNodeNoteBackgroundColors: config.useNodeNoteBackgroundColors === true,
+        openNodeIn: config.openNodeIn,
+        sections
+    };
 }

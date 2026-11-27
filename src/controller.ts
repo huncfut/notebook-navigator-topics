@@ -8,7 +8,8 @@ import {
     wouldIntroduceCycle,
     type TopicGraph,
     type TopicNote,
-    type TopicRequirement
+    type TopicRequirement,
+    type TopicSection
 } from './graph';
 
 import { planTopicDrop, type TopicDropPlan } from './topic-drop';
@@ -49,25 +50,29 @@ export class TopicsController {
         plugin.registerEvent(metadataCache.on('resolved', () => this.scheduleRefresh()));
         plugin.registerEvent(
             vault.on('rename', (file, oldPath) => {
+                const matchesOldPath = (path: string) => path === oldPath || path.startsWith(`${oldPath}/`);
+                const newPath = file.path;
+                const rebasePath = (path: string) => `${newPath}${path.slice(oldPath.length)}`;
                 for (const path of this.notes.keys()) {
-                    if (path === oldPath || path.startsWith(`${oldPath}/`)) this.notes.delete(path);
+                    if (matchesOldPath(path)) this.notes.delete(path);
                 }
                 this.scheduleRefresh();
-                if (
-                    !this.snapshot.config.sections.some(section =>
-                        section.hidden.some(path => path === oldPath || path.startsWith(`${oldPath}/`))
-                    )
-                )
-                    return;
-                void this.updateConfig(config => ({
-                    ...config,
-                    sections: config.sections.map(section => ({
-                        ...section,
-                        hidden: section.hidden.map(path =>
-                            path === oldPath || path.startsWith(`${oldPath}/`) ? `${file.path}${path.slice(oldPath.length)}` : path
-                        )
-                    }))
-                })).catch(reportTopicsError);
+                void this.updateConfig(config => {
+                    const sections = config.sections.map(section => {
+                        const movedIcons = Object.entries(section.icons ?? {}).filter(([path]) => matchesOldPath(path));
+                        if (movedIcons.length === 0 && !section.hidden.some(matchesOldPath)) return section;
+
+                        const icons = { ...section.icons };
+                        for (const [path] of movedIcons) delete icons[path];
+                        for (const [path, icon] of movedIcons) icons[rebasePath(path)] = icon;
+                        return {
+                            ...section,
+                            hidden: section.hidden.map(path => (matchesOldPath(path) ? rebasePath(path) : path)),
+                            icons
+                        };
+                    });
+                    return sections.some((section, index) => section !== config.sections[index]) ? { ...config, sections } : config;
+                }).catch(reportTopicsError);
             })
         );
         plugin.registerEvent(
@@ -147,7 +152,9 @@ export class TopicsController {
 
     updateConfig(update: (config: TopicsConfig) => TopicsConfig): Promise<void> {
         return this.enqueue(async () => {
-            const config = validateConfig(update(this.snapshot.config));
+            const next = update(this.snapshot.config);
+            if (next === this.snapshot.config) return;
+            const config = validateConfig(next);
             const { adapter } = this.app.vault;
             const contents = JSON.stringify(config, null, 2);
             if (await adapter.exists(this.settingsPath)) await adapter.process(this.settingsPath, () => contents);
@@ -155,6 +162,37 @@ export class TopicsController {
             this.snapshot = { ...this.snapshot, config };
             this.refresh();
         });
+    }
+
+    saveSection(draft: TopicSection, original?: TopicSection): Promise<void> {
+        return this.updateConfig(config => {
+            if (!original) return { ...config, sections: [...config.sections, draft] };
+
+            const current = config.sections.find(section => section.id === original.id);
+            if (JSON.stringify(current) !== JSON.stringify(original)) {
+                throw new Error('This topic section changed while the editor was open. Reopen it before editing.');
+            }
+            return {
+                ...config,
+                sections: config.sections.map(section => (section.id === original.id ? { ...draft, id: original.id } : section))
+            };
+        });
+    }
+
+    removeSection(sectionId: string): Promise<void> {
+        return this.updateConfig(config => ({ ...config, sections: config.sections.filter(section => section.id !== sectionId) }));
+    }
+
+    setTopicIcon(sectionId: string, path: string, icon: string | null): Promise<void> {
+        return this.updateConfig(config => ({
+            ...config,
+            sections: config.sections.map(section => {
+                if (section.id !== sectionId) return section;
+                const icons = { ...section.icons, ...(icon === null ? {} : { [path]: icon }) };
+                if (icon === null) delete icons[path];
+                return { ...section, icons };
+            })
+        }));
     }
 
     setHidden(sectionId: string, path: string, hidden: boolean): Promise<void> {
