@@ -596,7 +596,7 @@
 +                    const file = app.vault.getFileByPath(path);
 +                    return file ? getFileDisplayName(file) : path;
 +                },
-+                path => metadataService.getFileIcon(path),
++                metadataService,
 +                countLeaves
 +            );
 +        }, [

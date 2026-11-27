@@ -7,6 +7,8 @@ export interface TopicsConfig {
     showIcons: boolean;
     defaultIcon: string;
     useNodeNoteIcons: boolean;
+    useNodeNoteColors: boolean;
+    useNodeNoteBackgroundColors: boolean;
     openNodeIn: 'current-tab' | 'new-tab';
     sections: TopicSection[];
 }
@@ -16,6 +18,8 @@ export const defaultConfig: TopicsConfig = {
     showIcons: true,
     defaultIcon: defaultTopicIcon,
     useNodeNoteIcons: false,
+    useNodeNoteColors: false,
+    useNodeNoteBackgroundColors: false,
     openNodeIn: 'current-tab',
     sections: []
 };
@@ -72,6 +76,8 @@ export function validateConfig(value: unknown): TopicsConfig {
         showIcons: typeof config.showIcons === 'boolean' ? config.showIcons : defaultConfig.showIcons,
         defaultIcon: typeof config.defaultIcon === 'string' ? config.defaultIcon.trim() || defaultTopicIcon : defaultTopicIcon,
         useNodeNoteIcons: typeof config.useNodeNoteIcons === 'boolean' ? config.useNodeNoteIcons : defaultConfig.useNodeNoteIcons,
+        useNodeNoteColors: config.useNodeNoteColors === true,
+        useNodeNoteBackgroundColors: config.useNodeNoteBackgroundColors === true,
         openNodeIn: config.openNodeIn,
         sections
     };

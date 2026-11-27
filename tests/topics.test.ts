@@ -499,7 +499,7 @@ describe('navigation and the file list', () => {
         const getNoteIcon = vi.fn((path: string) => ['Audio.md', 'Music.md'].includes(path) ? 'lucide-book' : undefined);
         const customSection = { ...section, icons: { 'Audio.md': 'lucide-headphones' } };
         const config = { ...snapshot.config, defaultIcon: 'lucide-tags', useNodeNoteIcons: true, sections: [customSection, organizations] };
-        const rows = (settings: typeof config) => buildTopicNavigationItems({ ...snapshot, config: settings }, expanded, false, title, getNoteIcon);
+        const rows = (settings: typeof config) => buildTopicNavigationItems({ ...snapshot, config: settings }, expanded, false, title, { getFileIcon: getNoteIcon });
         const items = rows(config);
         expect(items.filter(item => item.data.name === 'Audio').map(item => item.data.icon)).toEqual(['lucide-headphones', 'lucide-headphones']);
         expect(items.find(item => item.data.name === 'Music')?.data.icon).toBe('lucide-book');
@@ -509,6 +509,27 @@ describe('navigation and the file list', () => {
         expect(rows({ ...config, useNodeNoteIcons: false }).find(item => item.data.name === 'Music')?.data.icon).toBe('lucide-tags');
         expect(rows({ ...config, showIcons: false }).every(item => item.data.icon === undefined)).toBe(true);
         expect(rows({ ...config, defaultIcon: defaultTopicIcon })[0].data.icon).toBe('lucide-network');
+    });
+
+    it('applies node-note foreground and background colors independently to every occurrence', () => {
+        const expanded = new Set(['"Music.md"', '"Technology.md"'].map(key => topicBranchPrefix(section.id) + key));
+        const noteMetadata = {
+            getFileColor: (path: string) => (path === 'Audio.md' ? '#33aa88' : undefined),
+            getFileBackgroundColor: (path: string) => (path === 'Audio.md' ? '#112233' : undefined)
+        };
+        for (const useNodeNoteColors of [false, true]) {
+            for (const useNodeNoteBackgroundColors of [false, true]) {
+                const config = validateConfig({ ...snapshot.config, useNodeNoteColors, useNodeNoteBackgroundColors });
+                const items = buildTopicNavigationItems({ ...snapshot, config }, expanded, false, title, noteMetadata);
+                const audio = items.filter(item => item.data.name === 'Audio');
+                expect(audio).toHaveLength(2);
+                for (const row of audio) {
+                    expect(row.color).toBe(useNodeNoteColors ? '#33aa88' : undefined);
+                    expect(row.backgroundColor).toBe(useNodeNoteBackgroundColors ? '#112233' : undefined);
+                }
+                expect(items.filter(item => item.data.name !== 'Audio').every(item => !item.color && !item.backgroundColor)).toBe(true);
+            }
+        }
     });
 
     it('uses direct leaves as the base for Navigator filter search and Omnisearch', () => {
@@ -871,7 +892,14 @@ describe('Obsidian integration', () => {
         const groups = page.createDefinitions({} as SettingsTabContext);
         const rows = groups.flatMap(item => 'type' in item && item.type === 'group' ? item.items ?? [] : []);
         expect(rows.map(row => row.name)).toEqual([
-            'Show Topics folder', 'Open node notes in', 'Show topic icons', 'Default topic icon', 'Use node-note icons', 'Sections'
+            'Show Topics folder',
+            'Open node notes in',
+            'Show topic icons',
+            'Default topic icon',
+            'Use node-note icons',
+            'Use node-note colors',
+            'Use node-note background colors',
+            'Sections'
         ]);
     });
 

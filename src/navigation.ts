@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { Plugin } from 'obsidian';
+import type { MetadataService } from '../services/MetadataService';
 import { NavigationPaneItemType } from '../types';
 import type { VirtualFolderItem } from '../types/virtualization';
 import { topicRows } from './browse';
@@ -99,12 +100,14 @@ export function buildTopicNavigationItems(
     expandedVirtualFolders: ReadonlySet<string>,
     showHidden: boolean,
     getTitle: (path: string) => string,
-    getNoteIcon?: (path: string) => string | undefined,
+    noteMetadata?: Partial<Pick<MetadataService, 'getFileIcon' | 'getFileColor' | 'getFileBackgroundColor'>>,
     countLeaves?: (paths: readonly string[]) => number
 ): VirtualFolderItem[] {
     if (!snapshot.ready || snapshot.config.sections.length === 0) return [];
     const items: VirtualFolderItem[] = [];
-    const defaultIcon = resolveTopicIcon(snapshot.config);
+    const { config } = snapshot;
+    const defaultIcon = resolveTopicIcon(config);
+    const getNoteIcon = (path: string) => noteMetadata?.getFileIcon?.(path);
     const add = (
         id: string,
         name: string,
@@ -114,6 +117,7 @@ export function buildTopicNavigationItems(
         icon: string | undefined,
         count?: number
     ) => {
+        const path = topic.kind === 'node' ? topic.selection.path : undefined;
         items.push({
             type: NavigationPaneItemType.VIRTUAL_FOLDER,
             data: { id, name, icon },
@@ -122,11 +126,13 @@ export function buildTopicNavigationItems(
             topic,
             hasChildren,
             showFileCount: count !== undefined,
-            noteCount: count === undefined ? undefined : { current: count, descendants: 0, total: count }
+            noteCount: count === undefined ? undefined : { current: count, descendants: 0, total: count },
+            color: path && config.useNodeNoteColors ? noteMetadata?.getFileColor?.(path) : undefined,
+            backgroundColor: path && config.useNodeNoteBackgroundColors ? noteMetadata?.getFileBackgroundColor?.(path) : undefined
         });
     };
-    const sectionLevel = snapshot.config.showFolder ? 1 : 0;
-    if (snapshot.config.showFolder) {
+    const sectionLevel = config.showFolder ? 1 : 0;
+    if (config.showFolder) {
         const expanded = !expandedVirtualFolders.has(topicsGroupId);
         add(topicsGroupId, 'Topics', 0, { kind: 'group' }, true, defaultIcon);
         if (!expanded) return items;
@@ -163,7 +169,7 @@ export function buildTopicNavigationItems(
                 sectionLevel + 1 + row.level,
                 { kind: 'node', selection, hidden: row.hidden },
                 row.hasChildren,
-                resolveTopicIcon(snapshot.config, { section, path: row.path }, getNoteIcon),
+                resolveTopicIcon(config, { section, path: row.path }, getNoteIcon),
                 count
             );
         }

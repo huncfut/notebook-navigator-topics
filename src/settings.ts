@@ -47,6 +47,15 @@ export function createTopicsSettingDefinitions(context: SettingsTabContext): Set
                 'useNodeNoteIcons'
             )
         ]),
+        createGroupDefinition('Colors', [
+            createTopicToggle(context, 'Use node-note colors', 'Use the node note’s color on its topic row.', 'useNodeNoteColors'),
+            createTopicToggle(
+                context,
+                'Use node-note background colors',
+                'Use the node note’s background color on its topic row.',
+                'useNodeNoteBackgroundColors'
+            )
+        ]),
         createGroupDefinition(undefined, [
             createRenderDefinition({
                 name: 'Sections',
@@ -61,7 +70,9 @@ export function createTopicsSettingDefinitions(context: SettingsTabContext): Set
     ];
 }
 
-function createTopicToggle(context: SettingsTabContext, name: string, desc: string, key: 'showFolder' | 'showIcons' | 'useNodeNoteIcons') {
+type TopicToggleKey = 'showFolder' | 'showIcons' | 'useNodeNoteIcons' | 'useNodeNoteColors' | 'useNodeNoteBackgroundColors';
+
+function createTopicToggle(context: SettingsTabContext, name: string, desc: string, key: TopicToggleKey) {
     return createTopicPreference(context, name, desc, key, (setting, change) => {
         let refresh: (value: boolean, ready: boolean) => void = () => {};
         setting.addToggle(toggle => {
@@ -73,7 +84,7 @@ function createTopicToggle(context: SettingsTabContext, name: string, desc: stri
     });
 }
 
-function createTopicPreference<Key extends 'showFolder' | 'showIcons' | 'useNodeNoteIcons' | 'openNodeIn'>(
+function createTopicPreference<Key extends TopicToggleKey | 'openNodeIn'>(
     { plugin }: SettingsTabContext,
     name: string,
     desc: string,
