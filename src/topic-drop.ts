@@ -13,7 +13,8 @@ type Properties = Record<string, unknown>;
 export type TopicDropPlan =
     | { status: 'linked'; changes: Properties }
     | { status: 'choice'; choices: TopicRequirement[] }
-    | { status: 'already-linked' | 'node' | 'ineligible' | 'conflict' };
+    | { status: 'node' }
+    | { status: 'already-linked' | 'ineligible' | 'conflict' };
 
 export function planTopicDrop(
     section: TopicSection,
@@ -26,17 +27,17 @@ export function planTopicDrop(
     const matchesLeaf = compileFilter(section.leafFilter);
     if (matchesNode(properties)) return { status: 'node' };
 
-    const relationshipKey = propertyKey(properties, section.relationshipProperty) ?? section.relationshipProperty;
-    const relationship = propertyKey(properties, relationshipKey) === undefined ? undefined : properties[relationshipKey];
-    const links = propertyValues(relationship);
-    if (links.some(value => typeof value !== 'string')) return { status: 'conflict' };
+    const existingRelationshipKey = propertyKey(properties, section.relationshipProperty);
+    const relationshipKey = existingRelationshipKey ?? section.relationshipProperty;
+    const links = propertyValues(existingRelationshipKey === undefined ? undefined : properties[existingRelationshipKey]);
     const alreadyLinked = links.some(value => {
+        if (value === newLink) return true;
         const path = linkPath(value);
         return path !== null && isTargetLink(path);
     });
     const changes = alreadyLinked ? {} : { [relationshipKey]: [...links, newLink] };
     const afterLink = { ...properties, ...changes };
-    if (matchesNode(afterLink)) return { status: 'node' };
+    if (matchesNode(afterLink)) return { status: 'ineligible' };
     if (matchesLeaf(afterLink)) return alreadyLinked ? { status: 'already-linked' } : { status: 'linked', changes };
     if (!section.leafFilter.trim()) return { status: 'ineligible' };
 
@@ -46,9 +47,10 @@ export function planTopicDrop(
         const key = existingKey ?? requirement.key;
         if (propertyKey({ [relationshipKey]: true }, key) !== undefined) continue;
         const current = existingKey === undefined ? undefined : afterLink[key];
-        if (current != null && (!Array.isArray(current) || current.some(value => typeof value !== 'string'))) continue;
+        const values = propertyValues(current);
+        if (values.some(value => typeof value !== 'string')) continue;
 
-        const next = { ...changes, [key]: Array.isArray(current) ? [...current, requirement.value] : requirement.value };
+        const next = { ...changes, [key]: current == null ? requirement.value : [...values, requirement.value] };
         const finalProperties = { ...properties, ...next };
         if (!matchesLeaf(finalProperties) || matchesNode(finalProperties)) continue;
         if (available.some(option => option.requirement.key === key && option.requirement.value === requirement.value)) continue;

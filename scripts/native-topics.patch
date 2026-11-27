@@ -1490,13 +1490,13 @@
 +            if (!files.length) return;
 +            const controller = getTopicsController(plugin);
 +            try {
-+                const results = await controller.attachLeaves(target, files, (file, choices) =>
++                const results = await controller.attachNotes(target, files, (file, choices) =>
 +                    chooseTopicLeafRequirement(controller, file, choices)
 +                );
 +                const labels = {
 +                    linked: 'linked',
 +                    'already-linked': 'already linked',
-+                    node: 'already a topic in this section',
++                    cycle: 'would create a cycle',
 +                    ineligible: 'ineligible',
 +                    conflict: 'conflicting metadata',
 +                    cancelled: 'skipped',
