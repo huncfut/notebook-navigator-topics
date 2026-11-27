@@ -771,18 +771,18 @@ describe('Obsidian integration', () => {
             const choose = vi.fn(async (_file, choices) => choices.find(choice => choice.value === 'notatka')!);
             const candidates = ['Alex.md', 'Blank.md', 'Conflict.md', 'Music.md'].map(path => vault.files.get(path)!);
             const before = vault.controller.getSnapshot();
-            expect(await vault.controller.attachLeaves(target, candidates, choose)).toEqual(
+            expect(await vault.controller.attachNotes(target, candidates, choose)).toEqual(
                 new Map([
                     ['linked', 2],
                     ['conflict', 1],
-                    ['node', 1]
+                    ['cycle', 1]
                 ])
             );
             expect(choose).toHaveBeenCalledTimes(1);
             expect(vault.frontmatter.get('Alex.md')).toMatchObject({ Typ: 'osoba', Powiązane: ['[[Music]]', '[[Audio]]'] });
             expect(vault.frontmatter.get('Blank.md')).toEqual({ Typ: 'notatka', Powiązane: ['[[Audio]]'] });
             expect(vault.frontmatter.get('Conflict.md')).toEqual(conflict);
-            expect(await vault.controller.attachLeaves(target, candidates.slice(0, 2), choose)).toEqual(new Map([['already-linked', 2]]));
+            expect(await vault.controller.attachNotes(target, candidates.slice(0, 2), choose)).toEqual(new Map([['already-linked', 2]]));
             const app = new App();
             const filter = (graphs: typeof before.graphs, query: string) =>
                 filterListPaneFiles({
@@ -812,6 +812,34 @@ describe('Obsidian integration', () => {
         }
     });
 
+    it('appends an existing topic’s parent once and blocks drops that would create a cycle', async () => {
+        const vault = mockVault(fixtures);
+        try {
+            await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section] }));
+            const choose = vi.fn(async () => null);
+            const target = { sectionId: section.id, path: 'Technology.md' };
+            const child = vault.files.get('Live Sound.md')!;
+            expect(await vault.controller.attachNotes(target, [child], choose)).toEqual(new Map([['linked', 1]]));
+            expect(await vault.controller.attachNotes(target, [child], choose)).toEqual(new Map([['already-linked', 1]]));
+            expect(vault.frontmatter.get(child.path)).toEqual({
+                Typ: 'koncept',
+                Powiązane: ['[[Audio]]', '[[Technology]]']
+            });
+            expect(vault.controller.getSnapshot().graphs.get(section.id)?.children.get(target.path)).toContain(child.path);
+            expect(
+                await vault.controller.attachNotes({ ...target, path: child.path }, [vault.files.get(target.path)!], choose)
+            ).toEqual(new Map([['cycle', 1]]));
+            expect(await vault.controller.attachNotes({ ...target, path: child.path }, [child], choose)).toEqual(
+                new Map([['cycle', 1]])
+            );
+            expect(vault.frontmatter.get(target.path)).toEqual({ Typ: 'koncept', Powiązane: [] });
+            expect(vault.frontmatter.get(child.path)?.Powiązane).toEqual(['[[Audio]]', '[[Technology]]']);
+            expect(choose).not.toHaveBeenCalled();
+        } finally {
+            vault.cleanup();
+        }
+    });
+
     it('keeps existing relationship entries and appends a missing leaf value on a topic drop', async () => {
         const child = { path: 'Child.md', properties: { Typ: 'unrelated', Powiązane: ['[[Music]]', null] } };
         const vault = mockVault([...fixtures, child]);
@@ -823,8 +851,8 @@ describe('Obsidian integration', () => {
             const target = { sectionId: section.id, path: 'Audio.md' };
             const files = [vault.files.get(child.path)!];
             const choose = vi.fn(async () => null);
-            expect(await vault.controller.attachLeaves(target, files, choose)).toEqual(new Map([['linked', 1]]));
-            expect(await vault.controller.attachLeaves(target, files, choose)).toEqual(new Map([['already-linked', 1]]));
+            expect(await vault.controller.attachNotes(target, files, choose)).toEqual(new Map([['linked', 1]]));
+            expect(await vault.controller.attachNotes(target, files, choose)).toEqual(new Map([['already-linked', 1]]));
             expect(vault.frontmatter.get(child.path)).toEqual({
                 Typ: ['unrelated', 'notatka'],
                 Powiązane: ['[[Music]]', null, '[[Audio]]']

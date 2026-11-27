@@ -13,7 +13,8 @@ type Properties = Record<string, unknown>;
 export type TopicDropPlan =
     | { status: 'linked'; changes: Properties }
     | { status: 'choice'; choices: TopicRequirement[] }
-    | { status: 'already-linked' | 'node' | 'ineligible' | 'conflict' };
+    | { status: 'node' }
+    | { status: 'already-linked' | 'ineligible' | 'conflict' };
 
 export function planTopicDrop(
     section: TopicSection,
@@ -36,7 +37,7 @@ export function planTopicDrop(
     });
     const changes = alreadyLinked ? {} : { [relationshipKey]: [...links, newLink] };
     const afterLink = { ...properties, ...changes };
-    if (matchesNode(afterLink)) return { status: 'node' };
+    if (matchesNode(afterLink)) return { status: 'ineligible' };
     if (matchesLeaf(afterLink)) return alreadyLinked ? { status: 'already-linked' } : { status: 'linked', changes };
     if (!section.leafFilter.trim()) return { status: 'ineligible' };
 

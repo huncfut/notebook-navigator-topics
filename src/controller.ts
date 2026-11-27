@@ -15,7 +15,10 @@ import {
 import { planTopicDrop, type TopicDropPlan } from './topic-drop';
 import type { TopicTarget } from './topic-filter';
 
-type DropResult = Exclude<TopicDropPlan['status'], 'choice'> | 'cancelled' | 'failed';
+type DropResult = Exclude<TopicDropPlan['status'], 'choice' | 'node'> | 'cycle' | 'cancelled' | 'failed';
+type NoteDropPlan =
+    | Extract<TopicDropPlan, { status: 'choice' }>
+    | { status: Exclude<DropResult, 'cancelled' | 'failed'> };
 type ChooseLeafRequirement = (file: TFile, choices: TopicRequirement[]) => Promise<TopicRequirement | null>;
 
 export interface TopicsSnapshot {
@@ -216,69 +219,86 @@ export class TopicsController {
         allowCycle = false
     ): Promise<'saved' | 'cycle'> {
         return this.enqueue(async () => {
-            this.refresh();
-            const section = this.snapshot.config.sections.find(item => item.id === sectionId);
-            const graph = this.snapshot.graphs.get(sectionId);
-            const child = this.app.vault.getFileByPath(childPath);
-            const parent = this.app.vault.getFileByPath(parentPath);
-            if (!section || !graph?.nodes.has(childPath) || !graph.nodes.has(parentPath) || !child || !parent) {
-                throw new Error('The section or one of its notes has changed.');
-            }
-
-            const cycle = new Error('Topic link would create a cycle.');
-            let changed: TopicNote['properties'] | undefined;
-            try {
-                await this.app.fileManager.processFrontMatter(child, properties => {
-                    const property = section.relationshipProperty;
-                    const key = propertyKey(properties, property);
-                    const current = key === undefined ? undefined : properties[key];
-                    const entries = propertyValues(current);
-                    const kept = entries.filter(value => {
-                        const target = linkPath(value);
-                        return !target || this.resolveLink(target, childPath) !== parentPath;
-                    });
-
-                    const linked = kept.length !== entries.length;
-                    if (operation === 'remove' || (operation === 'toggle' && linked)) {
-                        if (key === undefined || !linked) return;
-                        if (Array.isArray(current)) properties[key] = kept;
-                        else delete properties[key];
-                    } else {
-                        if (linked) return;
-                        const parents = graph.parents.get(childPath)?.includes(parentPath)
-                            ? new Map(graph.parents).set(childPath, [])
-                            : graph.parents;
-                        if (!allowCycle && wouldIntroduceCycle({ ...graph, parents }, childPath, parentPath)) throw cycle;
-                        Object.defineProperty(properties, key ?? property, {
-                            value: [...entries, this.app.fileManager.generateMarkdownLink(parent, childPath)],
-                            writable: true,
-                            configurable: true,
-                            enumerable: true
-                        });
-                    }
-                    changed = { ...properties };
-                });
-            } catch (error) {
-                if (error === cycle) return 'cycle';
-                throw error;
-            }
-            if (changed) {
-                this.notes.set(childPath, { path: childPath, properties: changed });
-                this.refresh();
-            }
-            return 'saved';
+            const result = await this.updateParent(sectionId, childPath, parentPath, operation, allowCycle);
+            return result === 'cycle' ? 'cycle' : 'saved';
         });
     }
 
-    async attachLeaves(target: TopicTarget, files: readonly TFile[], choose: ChooseLeafRequirement): Promise<Map<DropResult, number>> {
+    private async updateParent(
+        sectionId: string,
+        childPath: string,
+        parentPath: string,
+        operation: 'add' | 'remove' | 'toggle',
+        allowCycle: boolean
+    ): Promise<'saved' | 'cycle' | 'already-linked'> {
+        this.refresh();
+        const section = this.snapshot.config.sections.find(item => item.id === sectionId);
+        const graph = this.snapshot.graphs.get(sectionId);
+        const child = this.app.vault.getFileByPath(childPath);
+        const parent = this.app.vault.getFileByPath(parentPath);
+        if (!section || !graph?.nodes.has(childPath) || !graph.nodes.has(parentPath) || !child || !parent) {
+            throw new Error('The section or one of its notes has changed.');
+        }
+
+        const cycle = new Error('Topic link would create a cycle.');
+        let alreadyLinked = false;
+        let changed: TopicNote['properties'] | undefined;
+        try {
+            await this.app.fileManager.processFrontMatter(child, properties => {
+                const property = section.relationshipProperty;
+                const key = propertyKey(properties, property);
+                const current = key === undefined ? undefined : properties[key];
+                const entries = propertyValues(current);
+                const newLink = operation === 'add' ? this.app.fileManager.generateMarkdownLink(parent, childPath) : null;
+                const kept = entries.filter(value => {
+                    if (newLink !== null && value === newLink) return false;
+                    const target = linkPath(value);
+                    return !target || this.resolveLink(target, childPath) !== parentPath;
+                });
+
+                const linked = kept.length !== entries.length;
+                if (operation === 'remove' || (operation === 'toggle' && linked)) {
+                    if (key === undefined || !linked) return;
+                    if (Array.isArray(current)) properties[key] = kept;
+                    else delete properties[key];
+                } else {
+                    if (linked) {
+                        alreadyLinked = true;
+                        return;
+                    }
+                    const parents = graph.parents.get(childPath)?.includes(parentPath)
+                        ? new Map(graph.parents).set(childPath, [])
+                        : graph.parents;
+                    if (!allowCycle && wouldIntroduceCycle({ ...graph, parents }, childPath, parentPath)) throw cycle;
+                    Object.defineProperty(properties, key ?? property, {
+                        value: [...entries, newLink ?? this.app.fileManager.generateMarkdownLink(parent, childPath)],
+                        writable: true,
+                        configurable: true,
+                        enumerable: true
+                    });
+                }
+                changed = { ...properties };
+            });
+        } catch (error) {
+            if (error === cycle) return 'cycle';
+            throw error;
+        }
+        if (changed) {
+            this.notes.set(childPath, { path: childPath, properties: changed });
+            this.refresh();
+        }
+        return alreadyLinked ? 'already-linked' : 'saved';
+    }
+
+    async attachNotes(target: TopicTarget, files: readonly TFile[], choose: ChooseLeafRequirement): Promise<Map<DropResult, number>> {
         const counts = new Map<DropResult, number>();
         for (const file of new Set(files)) {
             let status: DropResult;
             try {
-                let result: TopicDropPlan | { status: 'cancelled' } = await this.attachLeaf(target, file);
+                let result: NoteDropPlan | { status: 'cancelled' } = await this.attachNote(target, file);
                 if (result.status === 'choice') {
                     const selected = await choose(file, result.choices);
-                    result = selected ? await this.attachLeaf(target, file, selected) : { status: 'cancelled' };
+                    result = selected ? await this.attachNote(target, file, selected) : { status: 'cancelled' };
                 }
                 status = result.status === 'choice' ? 'conflict' : result.status;
             } catch (error) {
@@ -290,7 +310,7 @@ export class TopicsController {
         return counts;
     }
 
-    private attachLeaf(target: TopicTarget, file: TFile, selected?: TopicRequirement): Promise<TopicDropPlan> {
+    private attachNote(target: TopicTarget, file: TFile, selected?: TopicRequirement): Promise<NoteDropPlan> {
         return this.enqueue(async () => {
             const { vault, metadataCache, fileManager } = this.app;
             const section = this.snapshot.config.sections.find(section => section.id === target.sectionId);
@@ -309,12 +329,16 @@ export class TopicsController {
             const plan = (properties: TopicNote['properties']) =>
                 planTopicDrop(section, properties, newLink, link => this.resolveLink(link, file.path) === parent.path, selected);
             const cached = this.notes.get(file.path)?.properties ?? metadataCache.getFileCache(file)?.frontmatter ?? {};
-            let result = plan(cached);
-            if (result.status !== 'linked') return result;
+            const initial = plan(cached);
+            if (initial.status === 'node') return this.attachTopicParent(target, file.path);
+            if (initial.status !== 'linked') return initial;
 
+            const drop: { result: TopicDropPlan } = { result: initial };
             let changed: TopicNote['properties'] | undefined;
             await fileManager.processFrontMatter(file, properties => {
-                result = plan(properties);
+                const result = plan(properties);
+                drop.result = result;
+                if (result.status === 'node') this.notes.set(file.path, { path: file.path, properties: { ...properties } });
                 if (result.status !== 'linked') return;
                 for (const [key, value] of Object.entries(result.changes)) {
                     Object.defineProperty(properties, key, { value, writable: true, configurable: true, enumerable: true });
@@ -325,8 +349,14 @@ export class TopicsController {
                 this.notes.set(file.path, { path: file.path, properties: changed });
                 this.refresh();
             }
-            return result;
+            if (drop.result.status === 'node') return this.attachTopicParent(target, file.path);
+            return drop.result;
         });
+    }
+
+    private async attachTopicParent(target: TopicTarget, child: string): Promise<NoteDropPlan> {
+        const result = await this.updateParent(target.sectionId, child, target.path, 'add', false);
+        return { status: result === 'saved' ? 'linked' : result };
     }
 
     title(path: string): string {
