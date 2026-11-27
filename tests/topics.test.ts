@@ -683,6 +683,9 @@ describe('topic drop and filter operands', () => {
         expect(
             planTopicDrop(single, { Typ: 'notatka', Powiązane: '[Audio alias](Audio.md)' }, '[[Audio]]', path => path === 'Audio.md')
         ).toEqual({ status: 'already-linked' });
+        expect(planTopicDrop(single, { Typ: 'notatka', Powiązane: ['[[Audio]]'] }, '[[Audio]]', () => false)).toEqual({
+            status: 'already-linked'
+        });
     });
 
     it('routes the macOS modifier and Shift through the shared tree handlers without selecting the topic', () => {
@@ -760,7 +763,8 @@ describe('topic drop and filter operands', () => {
 
 describe('Obsidian integration', () => {
     it('links eligible and newly classified drops, making both visible to running topic searches', async () => {
-        const vault = mockVault([...fixtures, { path: 'Blank.md', properties: {} }, note('Conflict', 'unrelated')]);
+        const conflict = { Typ: { value: 'unrelated' }, Powiązane: [] };
+        const vault = mockVault([...fixtures, { path: 'Blank.md', properties: {} }, { path: 'Conflict.md', properties: conflict }]);
         try {
             await vault.controller.updateConfig(() => ({ ...defaultConfig, sections: [section] }));
             const target = { sectionId: section.id, path: 'Audio.md' };
@@ -777,7 +781,7 @@ describe('Obsidian integration', () => {
             expect(choose).toHaveBeenCalledTimes(1);
             expect(vault.frontmatter.get('Alex.md')).toMatchObject({ Typ: 'osoba', Powiązane: ['[[Music]]', '[[Audio]]'] });
             expect(vault.frontmatter.get('Blank.md')).toEqual({ Typ: 'notatka', Powiązane: ['[[Audio]]'] });
-            expect(vault.frontmatter.get('Conflict.md')).toMatchObject({ Typ: 'unrelated', Powiązane: [] });
+            expect(vault.frontmatter.get('Conflict.md')).toEqual(conflict);
             expect(await vault.controller.attachLeaves(target, candidates.slice(0, 2), choose)).toEqual(new Map([['already-linked', 2]]));
             const app = new App();
             const filter = (graphs: typeof before.graphs, query: string) =>
@@ -803,6 +807,28 @@ describe('Obsidian integration', () => {
             expect(filter(current, updateFilterQueryWithTopic(query, venue, 'OR'))).toEqual(['Alex.md', 'Blank.md']);
             expect(filter(current, updateFilterQueryWithTopic(query, target, 'AND'))).toEqual(candidates.map(file => file.path));
             expect(filter(current, `#missing OR ${query}`)).toEqual(['Alex.md', 'Blank.md']);
+        } finally {
+            vault.cleanup();
+        }
+    });
+
+    it('keeps existing relationship entries and appends a missing leaf value on a topic drop', async () => {
+        const child = { path: 'Child.md', properties: { Typ: 'unrelated', Powiązane: ['[[Music]]', null] } };
+        const vault = mockVault([...fixtures, child]);
+        try {
+            await vault.controller.updateConfig(() => ({
+                ...defaultConfig,
+                sections: [{ ...section, leafFilter: 'Typ=notatka' }]
+            }));
+            const target = { sectionId: section.id, path: 'Audio.md' };
+            const files = [vault.files.get(child.path)!];
+            const choose = vi.fn(async () => null);
+            expect(await vault.controller.attachLeaves(target, files, choose)).toEqual(new Map([['linked', 1]]));
+            expect(await vault.controller.attachLeaves(target, files, choose)).toEqual(new Map([['already-linked', 1]]));
+            expect(vault.frontmatter.get(child.path)).toEqual({
+                Typ: ['unrelated', 'notatka'],
+                Powiązane: ['[[Music]]', null, '[[Audio]]']
+            });
         } finally {
             vault.cleanup();
         }
