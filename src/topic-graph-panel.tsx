@@ -109,6 +109,9 @@ export function TopicGraphPanel({ controller, sectionId, onSectionChange }: Topi
                                     </option>
                                 ))}
                             </select>
+                            <span className="nn-topic-graph-section-title" aria-hidden="true">
+                                {section?.name ?? 'Choose a topic section'}
+                            </span>
                             <ObsidianIcon name="chevron-down" className="nn-topic-graph-section-chevron" aria-hidden />
                         </div>
                         {graph && (

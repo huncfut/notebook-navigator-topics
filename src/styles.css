@@ -67,6 +67,7 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 .nn-topic-graph {
     --topic-graph-cycle: var(--text-warning);
     --topic-graph-edge: var(--text-muted);
+    --topic-graph-controls-inset: calc(2 * var(--size-4-3));
     display: flex;
     flex: 1;
     flex-direction: column;
@@ -80,8 +81,8 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
     align-items: start;
     gap: var(--size-4-2);
     position: absolute;
-    inset-inline: var(--size-4-3);
-    inset-block-start: var(--size-4-3);
+    inset-inline: var(--topic-graph-controls-inset);
+    inset-block-start: var(--topic-graph-controls-inset);
     z-index: 1;
     pointer-events: none;
 }
@@ -102,25 +103,31 @@ button.nn-topics-persistent-action[aria-label='Repair topic cycles'] {
 }
 
 select.dropdown.nn-topic-graph-section-select {
-    display: block;
-    field-sizing: content;
-    appearance: none;
-    max-width: 100%;
-    height: auto;
-    min-height: var(--input-height, 30px);
-    padding-block: var(--size-2-2);
-    padding-inline: 0 calc(var(--size-4-4) + var(--size-4-3));
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-    font-size: var(--font-ui-large);
-    font-weight: var(--font-semibold);
-    line-height: 1.25;
-    text-overflow: ellipsis;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-normal);
     pointer-events: auto;
 }
 
-select.dropdown.nn-topic-graph-section-select:focus-visible {
+.nn-topic-graph-section-title {
+    display: block;
+    align-content: center;
+    min-height: var(--input-height, 30px);
+    padding-block: var(--size-2-2);
+    padding-inline: 0 calc(var(--size-4-4) + var(--size-4-3));
+    font-size: var(--font-ui-large);
+    font-weight: var(--font-semibold);
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nn-topic-graph-section-select:focus-visible + .nn-topic-graph-section-title {
     outline: 2px solid var(--interactive-accent);
     outline-offset: 2px;
 }
@@ -140,7 +147,7 @@ select.dropdown.nn-topic-graph-section-select:focus-visible {
     height: var(--size-4-4);
 }
 
-.nn-topic-graph-section-select:disabled + .nn-topic-graph-section-chevron {
+.nn-topic-graph-section-select:disabled ~ :is(.nn-topic-graph-section-title, .nn-topic-graph-section-chevron) {
     opacity: 0.5;
 }
 
@@ -353,8 +360,8 @@ select.dropdown.nn-topic-graph-section-select:focus-visible {
 
 .nn-topic-graph-zoom {
     position: absolute;
-    inset-inline-end: var(--size-4-3);
-    inset-block-end: var(--size-4-3);
+    inset-inline-end: var(--topic-graph-controls-inset);
+    inset-block-end: var(--topic-graph-controls-inset);
 }
 
 .nn-topic-graph-empty {
